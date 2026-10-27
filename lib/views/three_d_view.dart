@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:hooplab_3d/export/reel_exporter.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -51,6 +53,28 @@ class _ThreeDViewState extends State<ThreeDView> {
     controller.loadFlutterAsset('assets/3d_court.html');
   }
 
+  Future<void> _shareReel() async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final file = await ReelExporter.exportJson(widget.playbookJson);
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'video/mp4', name: 'hooplab.mp4')],
+        text: 'Hooplab',
+        sharePositionOrigin: shareSheetOrigin(context),
+      );
+    } catch (err) {
+      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      debugPrint('3D reel export failed: $err');
+    }
+  }
+
   Future<void> _injectAssetsAndPlaybook() async {
     final payload = jsonEncode(widget.playbookJson);
     await controller.runJavaScript(
@@ -67,6 +91,13 @@ class _ThreeDViewState extends State<ThreeDView> {
         surfaceTintColor: Colors.transparent,
         foregroundColor: Colors.white,
         title: const Text('3D Preview'),
+        actions: [
+          IconButton(
+            tooltip: '分享影片',
+            icon: const Icon(Icons.ios_share_rounded),
+            onPressed: _shareReel,
+          ),
+        ],
       ),
       body: Stack(
         children: [

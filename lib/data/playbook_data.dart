@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:hooplab_3d/data/extra_plays.dart';
 import 'package:hooplab_3d/models/playbook_model.dart';
 
 part 'grok_half_court.dart';
@@ -193,7 +194,8 @@ BasketballPlay _play({
     title: title,
     englishTitle: englishTitle,
     tags: tags,
-    jsonData: convertGrokToAppJson(title) ??
+    jsonData: extraPlayJson[id] ??
+        convertGrokToAppJson(title) ??
         convertGrokToAppJson(englishTitle) ??
         buildBasicTwoStepJson(englishTitle),
   );
@@ -269,6 +271,90 @@ final List<BasketballPlay> _plays = <BasketballPlay>[
     title: '弱側交叉掩護',
     englishTitle: 'Weak-side Cross Screen',
     tags: const ['半場', '交叉掩護', '弱側'],
+  ),
+  _play(
+    id: 'half-11',
+    category: PlaybookCategory.halfCourt,
+    title: '牛角扭轉',
+    englishTitle: 'Horns Twist',
+    tags: const ['半場', '牛角', '錯位'],
+  ),
+  _play(
+    id: 'half-12',
+    category: PlaybookCategory.halfCourt,
+    title: '側翼擋拆',
+    englishTitle: 'Wing Pick & Roll',
+    tags: const ['半場', '擋拆', '側翼'],
+  ),
+  _play(
+    id: 'half-13',
+    category: PlaybookCategory.halfCourt,
+    title: 'UCLA 反跑',
+    englishTitle: 'UCLA Cut',
+    tags: const ['半場', 'UCLA', '切入'],
+  ),
+  _play(
+    id: 'half-14',
+    category: PlaybookCategory.halfCourt,
+    title: '下沉掩護',
+    englishTitle: 'Pin Down',
+    tags: const ['半場', '下沉', '外線'],
+  ),
+  _play(
+    id: 'fast-01',
+    category: PlaybookCategory.fastBreak,
+    title: '兩人快攻',
+    englishTitle: 'Two-Man Break',
+    tags: const ['全場', '快攻', '人數'],
+  ),
+  _play(
+    id: 'fast-02',
+    category: PlaybookCategory.fastBreak,
+    title: '三線快攻',
+    englishTitle: 'Three-Lane Break',
+    tags: const ['全場', '快攻', '三線'],
+  ),
+  _play(
+    id: 'fast-03',
+    category: PlaybookCategory.fastBreak,
+    title: '長傳出口',
+    englishTitle: 'Outlet Ahead',
+    tags: const ['全場', '出口', '長傳'],
+  ),
+  _play(
+    id: 'fast-04',
+    category: PlaybookCategory.fastBreak,
+    title: '籃下衝框',
+    englishTitle: 'Rim Runner',
+    tags: const ['全場', '快攻', '衝框'],
+  ),
+  _play(
+    id: 'fast-05',
+    category: PlaybookCategory.fastBreak,
+    title: '邊線推進',
+    englishTitle: 'Sideline Push',
+    tags: const ['全場', '邊線', '推進'],
+  ),
+  _play(
+    id: 'fast-06',
+    category: PlaybookCategory.fastBreak,
+    title: '拖後掩護',
+    englishTitle: 'Trail Screen',
+    tags: const ['全場', '掩護', '拖後'],
+  ),
+  _play(
+    id: 'fast-07',
+    category: PlaybookCategory.fastBreak,
+    title: '提前擋拆',
+    englishTitle: 'Early Drag',
+    tags: const ['全場', '擋拆', '提前'],
+  ),
+  _play(
+    id: 'fast-08',
+    category: PlaybookCategory.fastBreak,
+    title: '多打少分球',
+    englishTitle: 'Numbers Kick',
+    tags: const ['全場', '快攻', '分球'],
   ),
   _play(
     id: 'in-01',
@@ -549,75 +635,5 @@ final List<BasketballPlay> _plays = <BasketballPlay>[
     title: '全場緊迫',
     englishTitle: 'Full Court Press',
     tags: const ['緊迫', '全場', '節奏'],
-  ),
-  _play(
-    id: 'mine-01',
-    category: PlaybookCategory.mine,
-    title: '我的第一套',
-    englishTitle: 'My First Set',
-    tags: const ['自訂', '模板', '半場'],
-  ),
-  _play(
-    id: 'mine-02',
-    category: PlaybookCategory.mine,
-    title: '快速得分',
-    englishTitle: 'Quick Hitter',
-    tags: const ['自訂', '快打', '外線'],
-  ),
-  _play(
-    id: 'mine-03',
-    category: PlaybookCategory.mine,
-    title: '底角重擊',
-    englishTitle: 'Corner Punch',
-    tags: const ['自訂', '底角', '三分'],
-  ),
-  _play(
-    id: 'mine-04',
-    category: PlaybookCategory.mine,
-    title: '高位擋拆',
-    englishTitle: 'High PnR',
-    tags: const ['自訂', '擋拆', '高位'],
-  ),
-  _play(
-    id: 'mine-05',
-    category: PlaybookCategory.mine,
-    title: '低位拆開',
-    englishTitle: 'Post Split',
-    tags: const ['自訂', '低位', '拆開'],
-  ),
-  _play(
-    id: 'mine-06',
-    category: PlaybookCategory.mine,
-    title: '手遞手系列',
-    englishTitle: 'DHO Series',
-    tags: const ['自訂', '手遞手', '錯位'],
-  ),
-  _play(
-    id: 'mine-07',
-    category: PlaybookCategory.mine,
-    title: '弱邊機動',
-    englishTitle: 'Motion Weak',
-    tags: const ['自訂', '機動進攻', '弱邊'],
-  ),
-  _play(
-    id: 'mine-08',
-    category: PlaybookCategory.mine,
-    title: '拖延時間',
-    englishTitle: 'Delay Game',
-    tags: const ['自訂', '控節奏', '四角'],
-  ),
-  _play(
-    id: 'mine-09',
-    category: PlaybookCategory.mine,
-    title: '暫停後特攻',
-    englishTitle: 'ATO Special',
-    tags: const ['自訂', 'ATO', '最後一擊'],
-  ),
-  _play(
-    id: 'mine-10',
-    category: PlaybookCategory.mine,
-    title: '五外練習',
-    englishTitle: 'Practice 5-Out',
-    tags: const ['自訂', '五外', '練習'],
   ),
 ];

@@ -1,5 +1,6 @@
 class PlaybookCategory {
   static const halfCourt = '半場戰術';
+  static const fastBreak = '全場快攻';
   static const inbound = '底線/邊線界外';
   static const pressBreak = '破緊迫';
   static const lastFive = '最後5秒';
@@ -8,6 +9,7 @@ class PlaybookCategory {
 
   static const all = <String>[
     halfCourt,
+    fastBreak,
     inbound,
     pressBreak,
     lastFive,

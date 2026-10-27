@@ -3,8 +3,11 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:hooplab_3d/data/local_playbook.dart';
+import 'package:hooplab_3d/export/reel_exporter.dart';
 import 'package:hooplab_3d/models/playbook_models.dart';
 import 'package:hooplab_3d/views/three_d_view.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// NBA full-court proportions in feet, fitted uniformly to the paint area.
 class CourtGeometry {
@@ -96,7 +99,18 @@ const _initialDefense = <Offset>[
 
 enum LineType { run, pass, screen, shoot }
 
-enum DrawTool { move, run, pass, screen, shoot }
+enum DrawTool { move, run, pass, screen, shoot, erase }
+
+enum _DockKind { offense, defense, ball }
+
+class _DockArm {
+  const _DockArm(this.kind, this.index);
+
+  final _DockKind kind;
+  final int index;
+
+  bool matches(_DockArm other) => kind == other.kind && index == other.index;
+}
 
 class DrawnLine {
   const DrawnLine({required this.points, required this.type});
@@ -113,21 +127,36 @@ class ResolvedBoard {
   ResolvedBoard({
     required List<Offset> offense,
     required List<Offset> defense,
+    List<bool>? offenseOn,
+    List<bool>? defenseOn,
     this.ballCarrierId,
     this.standaloneBallPosition,
+    this.ballOn = true,
   })  : offense = List<Offset>.from(offense),
-        defense = List<Offset>.from(defense);
+        defense = List<Offset>.from(defense),
+        offenseOn = List<bool>.from(
+          offenseOn ?? List<bool>.filled(offense.length, true),
+        ),
+        defenseOn = List<bool>.from(
+          defenseOn ?? List<bool>.filled(defense.length, true),
+        );
 
   final List<Offset> offense;
   final List<Offset> defense;
+  final List<bool> offenseOn;
+  final List<bool> defenseOn;
   int? ballCarrierId;
   Offset? standaloneBallPosition;
+  bool ballOn;
 
   ResolvedBoard copy() => ResolvedBoard(
         offense: offense,
         defense: defense,
+        offenseOn: offenseOn,
+        defenseOn: defenseOn,
         ballCarrierId: ballCarrierId,
         standaloneBallPosition: standaloneBallPosition,
+        ballOn: ballOn,
       );
 }
 
@@ -138,6 +167,8 @@ AssignedPaths assignMovingPaths({
   required Rect court,
   int visibleCount = 5,
   Set<LineType> types = const {LineType.run, LineType.screen},
+  List<bool>? offenseActive,
+  List<bool>? defenseActive,
 }) {
   final assignedOffense = <int, List<Offset>>{};
   final assignedDefense = <int, List<Offset>>{};
@@ -151,8 +182,9 @@ AssignedPaths assignMovingPaths({
     String? bestId;
     var bestDistance = pathSnapRadius;
 
-    void consider(List<Offset> nodes, String prefix, int count) {
+    void consider(List<Offset> nodes, String prefix, int count, List<bool>? active) {
       for (var i = 0; i < count; i++) {
+        if (active != null && i < active.length && !active[i]) continue;
         final id = '$prefix$i';
         if (claimed.contains(id)) continue;
         final player = CourtGeometry.normalizedToCanvas(nodes[i], court);
@@ -164,8 +196,8 @@ AssignedPaths assignMovingPaths({
       }
     }
 
-    consider(offense, 'o', offenseCount);
-    consider(defense, 'd', defenseCount);
+    consider(offense, 'o', offenseCount, offenseActive);
+    consider(defense, 'd', defenseCount, defenseActive);
     if (bestId == null) continue;
     claimed.add(bestId!);
     final index = int.parse(bestId!.substring(1));
@@ -191,12 +223,14 @@ int? nearestOffenseId({
   required Rect court,
   int visibleCount = 5,
   double snap = pathSnapRadius,
+  List<bool>? active,
 }) {
   final point = CourtGeometry.normalizedToCanvas(normalized, court);
   int? best;
   var bestDistance = snap;
   final count = math.min(visibleCount, offense.length);
   for (var i = 0; i < count; i++) {
+    if (active != null && i < active.length && !active[i]) continue;
     final player = CourtGeometry.normalizedToCanvas(offense[i], court);
     final distance = (player - point).distance;
     if (distance <= bestDistance) {
@@ -247,6 +281,8 @@ ResolvedBoard applyFrameLines({
     defense: start.defense,
     court: court,
     visibleCount: visibleCount,
+    offenseActive: start.offenseOn,
+    defenseActive: start.defenseOn,
   );
   moved.offense.forEach((index, path) {
     if (index >= 0 && index < next.offense.length && path.length >= 2) {
@@ -271,6 +307,7 @@ ResolvedBoard applyFrameLines({
       offense: next.offense,
       court: court,
       visibleCount: visibleCount,
+      active: next.offenseOn,
     );
     if (receiver != null) {
       next.ballCarrierId = receiver;
@@ -337,6 +374,12 @@ class _PlayboardViewState extends State<PlayboardView>
     with SingleTickerProviderStateMixin {
   final List<Offset> _offense = List<Offset>.from(_initialOffense);
   final List<Offset> _defense = List<Offset>.from(_initialDefense);
+  final List<bool> _offenseOn = List<bool>.filled(5, false);
+  final List<bool> _defenseOn = List<bool>.filled(5, false);
+  bool _ballOn = false;
+  _DockArm? _arm;
+  bool _placing = false;
+  Offset? _gestureLocal;
   final List<List<DrawnLine>> frames = [[]];
   int currentFrameIndex = 0;
   final List<_BoardSnapshot> _undoStack = [];
@@ -347,7 +390,7 @@ class _PlayboardViewState extends State<PlayboardView>
   bool isPlaying = false;
   double currentProgress = 0.0;
   double playbackSpeed = 1.0;
-  int? ballCarrierId = 1;
+  int? ballCarrierId;
   Offset? standaloneBallPosition;
   DrawnLine? _activeStroke;
   int? _draggingIndex;
@@ -415,31 +458,29 @@ class _PlayboardViewState extends State<PlayboardView>
       if (playbook.steps.isEmpty) return;
 
       final offense = List<Offset>.from(_initialOffense);
-      final defenseIds = <int>{};
-      for (final step in playbook.steps) {
-        for (final action in step.actions) {
-          if (action.playerId >= 11 && action.playerId <= 15) {
-            defenseIds.add(action.playerId);
-          }
-        }
-      }
-      final defense = defenseIds.isEmpty
-          ? <Offset>[]
-          : List<Offset>.from(_initialDefense);
-      int? carrier = 1;
+      final defense = List<Offset>.from(_initialDefense);
+      final offenseOn = List<bool>.filled(5, false);
+      final defenseOn = List<bool>.filled(5, false);
+      int? carrier;
+      var ballOn = false;
 
       void placePlayer(int id, List<double> point) {
         if (point.length < 2) return;
         final pos = Offset(point[0], point[1]);
-        if (id >= 1 && id <= 5) offense[id - 1] = pos;
-        if (id >= 11 && id <= 15 && defense.isNotEmpty) {
+        if (id >= 1 && id <= 5) {
+          offense[id - 1] = pos;
+          offenseOn[id - 1] = true;
+        }
+        if (id >= 11 && id <= 15) {
           defense[id - 11] = pos;
+          defenseOn[id - 11] = true;
         }
       }
 
       for (final action in playbook.steps.first.actions) {
         if (action.actionType == ActionType.dribble) {
           carrier = action.playerId > 0 ? action.playerId : null;
+          ballOn = true;
         }
         if (action.path.isNotEmpty) {
           placePlayer(action.playerId, action.path.first);
@@ -474,15 +515,22 @@ class _PlayboardViewState extends State<PlayboardView>
         _defense
           ..clear()
           ..addAll(defense);
+        for (var i = 0; i < 5; i++) {
+          _offenseOn[i] = offenseOn[i];
+          _defenseOn[i] = defenseOn[i];
+        }
         frames
           ..clear()
           ..addAll(loadedFrames);
         currentFrameIndex = 0;
         currentProgress = 0;
         isPlaying = false;
-        ballCarrierId = carrier;
-        standaloneBallPosition =
-            carrier == null ? const Offset(0.50, 0.50) : null;
+        _ballOn = ballOn;
+        ballCarrierId = ballOn && carrier != null && carrier > 0 ? carrier : null;
+        standaloneBallPosition = ballOn && ballCarrierId == null
+            ? const Offset(0.50, 0.50)
+            : null;
+        _arm = null;
       });
     } catch (err) {
       debugPrint('Failed to load initial play data: $err');
@@ -572,14 +620,14 @@ class _PlayboardViewState extends State<PlayboardView>
             onPressed: _open3DPreview,
           ),
           IconButton(
-            tooltip: 'Save',
-            icon: const Icon(Icons.save_outlined),
-            onPressed: () => _notify('Play saved'),
+            tooltip: '分享影片',
+            icon: const Icon(Icons.ios_share_rounded),
+            onPressed: _shareReel,
           ),
           IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => _notify('Settings'),
+            tooltip: '儲存到我的戰術',
+            icon: const Icon(Icons.save_outlined),
+            onPressed: _savePlay,
           ),
         ],
       ),
@@ -606,12 +654,15 @@ class _PlayboardViewState extends State<PlayboardView>
                       _onPanUpdate(details.localPosition, courtRect, radius),
                   onPanEnd: (_) => _onPanEnd(courtRect, resolved),
                   onPanCancel: () => _onPanEnd(courtRect, resolved),
+                  onTapUp: (details) => _onTapUp(details.localPosition, courtRect, resolved),
                   child: CustomPaint(
                     size: size,
                     painter: CourtPainter(
                       courtRect: courtRect,
                       offense: List<Offset>.from(resolved.offense),
                       defense: List<Offset>.from(resolved.defense),
+                      offenseOnCourt: List<bool>.from(resolved.offenseOn),
+                      defenseOnCourt: List<bool>.from(resolved.defenseOn),
                       drawnLines: drawnLines.map((line) => line.copy()).toList(),
                       activeStroke: _activeStroke?.copy(),
                       playerRadius: radius,
@@ -619,8 +670,9 @@ class _PlayboardViewState extends State<PlayboardView>
                       draggingDefense: _draggingDefense,
                       is3v3Mode: is3v3Mode,
                       currentProgress: currentProgress,
-                      ballCarrierId: resolved.ballCarrierId,
-                      standaloneBallPosition: resolved.standaloneBallPosition,
+                      ballCarrierId: resolved.ballOn ? resolved.ballCarrierId : null,
+                      standaloneBallPosition:
+                          resolved.ballOn ? resolved.standaloneBallPosition : null,
                       draggingBall: _draggingBall,
                       ballDragPosition: _ballDragPosition,
                     ),
@@ -642,6 +694,18 @@ class _PlayboardViewState extends State<PlayboardView>
             onNextFrame: _nextFrame,
             onAddFrame: _addFrame,
             onDeleteFrame: deleteCurrentFrame,
+          ),
+          _PieceDock(
+            offenseOn: _offenseOn,
+            defenseOn: _defenseOn,
+            ballOn: _ballOn,
+            is3v3Mode: is3v3Mode,
+            armed: _arm,
+            onArm: (arm) => setState(() {
+              _arm = _arm != null && _arm!.matches(arm) ? null : arm;
+              selectedTool = DrawTool.move;
+            }),
+            onRecall: _recallPiece,
           ),
           _PlayboardToolbar(
             canUndo: _undoStack.isNotEmpty,
@@ -671,7 +735,8 @@ class _PlayboardViewState extends State<PlayboardView>
 
   List<DrawnLine> get drawnLines => frames[currentFrameIndex];
 
-  bool get _isDrawing => selectedTool != DrawTool.move;
+  bool get _isDrawing =>
+      selectedTool != DrawTool.move && selectedTool != DrawTool.erase;
 
   LineType get _activeLineType {
     switch (selectedTool) {
@@ -684,6 +749,7 @@ class _PlayboardViewState extends State<PlayboardView>
       case DrawTool.shoot:
         return LineType.shoot;
       case DrawTool.move:
+      case DrawTool.erase:
         return LineType.run;
     }
   }
@@ -736,8 +802,11 @@ class _PlayboardViewState extends State<PlayboardView>
     return ResolvedBoard(
       offense: _offense,
       defense: _defense,
-      ballCarrierId: ballCarrierId,
-      standaloneBallPosition: standaloneBallPosition,
+      offenseOn: _offenseOn,
+      defenseOn: _defenseOn,
+      ballCarrierId: _ballOn ? ballCarrierId : null,
+      standaloneBallPosition: _ballOn ? standaloneBallPosition : null,
+      ballOn: _ballOn,
     );
   }
 
@@ -767,9 +836,10 @@ class _PlayboardViewState extends State<PlayboardView>
     int? bestId;
     var bestDistance = _exportSnapPx;
 
-    void consider(List<Offset> nodes, int idOffset) {
+    void consider(List<Offset> nodes, int idOffset, List<bool> active) {
       final count = math.min(nodes.length, 5);
       for (var i = 0; i < count; i++) {
+        if (i < active.length && !active[i]) continue;
         final playerId = idOffset + i;
         if (claimed.contains(playerId)) continue;
         final player = CourtGeometry.normalizedToCanvas(nodes[i], court);
@@ -781,14 +851,15 @@ class _PlayboardViewState extends State<PlayboardView>
       }
     }
 
-    consider(board.offense, 1);
-    if (!offenseOnly) consider(board.defense, 11);
+    consider(board.offense, 1, board.offenseOn);
+    if (!offenseOnly) consider(board.defense, 11, board.defenseOn);
     return bestId;
   }
 
   List<PlayerAction> _formationActionsFrom(ResolvedBoard board) {
     final actions = <PlayerAction>[];
     for (var i = 0; i < board.offense.length; i++) {
+      if (i < board.offenseOn.length && !board.offenseOn[i]) continue;
       actions.add(
         PlayerAction(
           playerId: i + 1,
@@ -798,6 +869,7 @@ class _PlayboardViewState extends State<PlayboardView>
       );
     }
     for (var i = 0; i < board.defense.length; i++) {
+      if (i < board.defenseOn.length && !board.defenseOn[i]) continue;
       actions.add(
         PlayerAction(
           playerId: 11 + i,
@@ -816,7 +888,7 @@ class _PlayboardViewState extends State<PlayboardView>
     } else if (board.standaloneBallPosition != null) {
       ballPath.add(board.standaloneBallPosition!);
     }
-    if (ballPath.isNotEmpty) {
+    if (board.ballOn && ballPath.isNotEmpty) {
       actions.add(
         PlayerAction(
           playerId: board.ballCarrierId ?? 0,
@@ -937,6 +1009,19 @@ class _PlayboardViewState extends State<PlayboardView>
     double radius,
     ResolvedBoard board,
   ) {
+    _gestureLocal = local;
+    if (selectedTool == DrawTool.erase) {
+      _eraseNear(local, court);
+      return;
+    }
+    if (_arm != null && selectedTool == DrawTool.move) {
+      setState(() {
+        _placing = true;
+        _draggingIndex = null;
+        _draggingBall = false;
+      });
+      return;
+    }
     if (_isDrawing) {
       if (!court.contains(local)) return;
       setState(() {
@@ -954,9 +1039,10 @@ class _PlayboardViewState extends State<PlayboardView>
     var defenseHit = false;
     var closest = radius * 1.2;
 
-    void consider(List<Offset> nodes, bool defense) {
+    void consider(List<Offset> nodes, bool defense, List<bool> active) {
       final count = math.min(_visiblePlayerCount, nodes.length);
       for (var i = 0; i < count; i++) {
+        if (i < active.length && !active[i]) continue;
         final center = CourtGeometry.normalizedToCanvas(nodes[i], court);
         final distance = (local - center).distance;
         if (distance <= closest) {
@@ -967,8 +1053,8 @@ class _PlayboardViewState extends State<PlayboardView>
       }
     }
 
-    consider(board.offense, false);
-    consider(board.defense, true);
+    consider(board.offense, false, board.offenseOn);
+    consider(board.defense, true, board.defenseOn);
 
     final ballPos = _ballCanvasForHit(court, radius, board);
     const ballHitRadius = CourtGeometry.basketballHitRadius;
@@ -992,6 +1078,11 @@ class _PlayboardViewState extends State<PlayboardView>
   }
 
   void _onPanUpdate(Offset local, Rect court, double radius) {
+    _gestureLocal = local;
+    if (_placing || selectedTool == DrawTool.erase) {
+      if (selectedTool == DrawTool.erase) _eraseNear(local, court);
+      return;
+    }
     if (_isDrawing) {
       final stroke = _activeStroke;
       if (stroke == null) return;
@@ -1038,7 +1129,30 @@ class _PlayboardViewState extends State<PlayboardView>
     });
   }
 
+  void _onTapUp(Offset local, Rect court, ResolvedBoard board) {
+    if (_arm == null || selectedTool != DrawTool.move || _placing) return;
+    if (!court.contains(local)) return;
+    setState(() {
+      _undoStack.add(_snapshot());
+      _redoStack.clear();
+      _dropArmed(CourtGeometry.canvasToNormalized(local, court), court, board);
+    });
+  }
+
   void _onPanEnd(Rect court, ResolvedBoard board) {
+    if (_placing) {
+      final local = _gestureLocal;
+      setState(() {
+        _placing = false;
+        if (local != null && court.contains(local) && _arm != null) {
+          _undoStack.add(_snapshot());
+          _redoStack.clear();
+          _dropArmed(CourtGeometry.canvasToNormalized(local, court), court, board);
+        }
+      });
+      return;
+    }
+    if (selectedTool == DrawTool.erase) return;
     if (_isDrawing) {
       final stroke = _activeStroke;
       if (stroke != null && stroke.points.length >= 2) {
@@ -1063,6 +1177,7 @@ class _PlayboardViewState extends State<PlayboardView>
           var nearest = 40.0;
           final count = math.min(_visiblePlayerCount, board.offense.length);
           for (var i = 0; i < count; i++) {
+            if (i < board.offenseOn.length && !board.offenseOn[i]) continue;
             final player = CourtGeometry.normalizedToCanvas(board.offense[i], court);
             final distance = (dropCanvas - player).distance;
             if (distance <= nearest) {
@@ -1100,10 +1215,186 @@ class _PlayboardViewState extends State<PlayboardView>
     });
   }
 
+  void _dropArmed(Offset normalized, Rect court, ResolvedBoard board) {
+    final arm = _arm;
+    if (arm == null) return;
+    final inset = 0.04;
+    final spot = Offset(
+      normalized.dx.clamp(inset, 1 - inset),
+      normalized.dy.clamp(inset, 1 - inset),
+    );
+    switch (arm.kind) {
+      case _DockKind.offense:
+        _offense[arm.index] = spot;
+        _offenseOn[arm.index] = true;
+        break;
+      case _DockKind.defense:
+        _defense[arm.index] = spot;
+        _defenseOn[arm.index] = true;
+        break;
+      case _DockKind.ball:
+        final drop = CourtGeometry.normalizedToCanvas(spot, court);
+        int? nearestId;
+        var nearest = 48.0;
+        final count = math.min(_visiblePlayerCount, board.offense.length);
+        for (var i = 0; i < count; i++) {
+          if (i < _offenseOn.length && !_offenseOn[i]) continue;
+          final player = CourtGeometry.normalizedToCanvas(board.offense[i], court);
+          final distance = (drop - player).distance;
+          if (distance <= nearest) {
+            nearest = distance;
+            nearestId = i + 1;
+          }
+        }
+        _ballOn = true;
+        if (nearestId != null) {
+          ballCarrierId = nearestId;
+          standaloneBallPosition = null;
+        } else {
+          ballCarrierId = null;
+          standaloneBallPosition = spot;
+        }
+        break;
+    }
+    _arm = null;
+  }
+
+  void _recallPiece(_DockArm arm) {
+    setState(() {
+      _undoStack.add(_snapshot());
+      _redoStack.clear();
+      switch (arm.kind) {
+        case _DockKind.offense:
+          _offenseOn[arm.index] = false;
+          if (ballCarrierId == arm.index + 1) {
+            ballCarrierId = null;
+            _ballOn = false;
+            standaloneBallPosition = null;
+          }
+        case _DockKind.defense:
+          _defenseOn[arm.index] = false;
+        case _DockKind.ball:
+          _ballOn = false;
+          ballCarrierId = null;
+          standaloneBallPosition = null;
+      }
+      if (_arm != null && _arm!.matches(arm)) _arm = null;
+    });
+  }
+
+  bool _eraseNear(Offset local, Rect court) {
+    const hit = 28.0;
+    final kept = <DrawnLine>[];
+    var removed = false;
+    for (final line in drawnLines) {
+      final canvasPoints = [
+        for (final point in line.points)
+          CourtGeometry.normalizedToCanvas(point, court),
+      ];
+      var close = false;
+      for (var i = 1; i < canvasPoints.length; i++) {
+        if (_distanceToSegment(local, canvasPoints[i - 1], canvasPoints[i]) <= hit) {
+          close = true;
+          break;
+        }
+      }
+      if (close) {
+        removed = true;
+      } else {
+        kept.add(line);
+      }
+    }
+    if (!removed) return false;
+    setState(() {
+      if (_undoStack.isEmpty || _undoStack.last.lines.length == drawnLines.length) {
+        _undoStack.add(_snapshot());
+        _redoStack.clear();
+      }
+      frames[currentFrameIndex]
+        ..clear()
+        ..addAll(kept);
+    });
+    return true;
+  }
+
+  double _distanceToSegment(Offset point, Offset start, Offset end) {
+    final delta = end - start;
+    final length = delta.distance;
+    if (length < 0.001) return (point - start).distance;
+    final t = ((point - start).dx * delta.dx + (point - start).dy * delta.dy) /
+        (length * length);
+    final clamped = t.clamp(0.0, 1.0);
+    final projection = start + delta * clamped;
+    return (point - projection).distance;
+  }
+
+  Future<void> _savePlay() async {
+    final controller = TextEditingController(text: '我的戰術');
+    final title = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF171C26),
+        title: const Text('儲存到我的戰術', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: '戰術名稱',
+            hintStyle: TextStyle(color: Colors.white38),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('儲存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (title == null || !mounted) return;
+    await LocalPlaybook.instance.save(title: title, jsonData: exportToJson());
+    if (!mounted) return;
+    _notify('已存到我的戰術');
+  }
+
+  Future<void> _shareReel() async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final file = await ReelExporter.exportJson(exportToJson());
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'video/mp4', name: 'hooplab.mp4')],
+        text: 'Hooplab',
+        sharePositionOrigin: shareSheetOrigin(context),
+      );
+    } catch (err) {
+      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (mounted) _notify('影片沒有完成');
+      debugPrint('Reel export failed: $err');
+    }
+  }
+
   _BoardSnapshot _snapshot() {
     return _BoardSnapshot(
       offense: List<Offset>.from(_offense),
       defense: List<Offset>.from(_defense),
+      offenseOn: List<bool>.from(_offenseOn),
+      defenseOn: List<bool>.from(_defenseOn),
+      ballOn: _ballOn,
+      ballCarrierId: ballCarrierId,
+      standaloneBallPosition: standaloneBallPosition,
       lines: drawnLines.map((line) => line.copy()).toList(),
     );
   }
@@ -1115,6 +1406,13 @@ class _PlayboardViewState extends State<PlayboardView>
     _defense
       ..clear()
       ..addAll(snapshot.defense);
+    for (var i = 0; i < 5; i++) {
+      _offenseOn[i] = i < snapshot.offenseOn.length && snapshot.offenseOn[i];
+      _defenseOn[i] = i < snapshot.defenseOn.length && snapshot.defenseOn[i];
+    }
+    _ballOn = snapshot.ballOn;
+    ballCarrierId = snapshot.ballCarrierId;
+    standaloneBallPosition = snapshot.standaloneBallPosition;
     drawnLines
       ..clear()
       ..addAll(snapshot.lines.map((line) => line.copy()));
@@ -1199,11 +1497,21 @@ class _BoardSnapshot {
   const _BoardSnapshot({
     required this.offense,
     required this.defense,
+    required this.offenseOn,
+    required this.defenseOn,
+    required this.ballOn,
+    required this.ballCarrierId,
+    required this.standaloneBallPosition,
     required this.lines,
   });
 
   final List<Offset> offense;
   final List<Offset> defense;
+  final List<bool> offenseOn;
+  final List<bool> defenseOn;
+  final bool ballOn;
+  final int? ballCarrierId;
+  final Offset? standaloneBallPosition;
   final List<DrawnLine> lines;
 }
 
@@ -1405,6 +1713,135 @@ class _SpeedChip extends StatelessWidget {
   }
 }
 
+class _PieceDock extends StatelessWidget {
+  const _PieceDock({
+    required this.offenseOn,
+    required this.defenseOn,
+    required this.ballOn,
+    required this.is3v3Mode,
+    required this.armed,
+    required this.onArm,
+    required this.onRecall,
+  });
+
+  final List<bool> offenseOn;
+  final List<bool> defenseOn;
+  final bool ballOn;
+  final bool is3v3Mode;
+  final _DockArm? armed;
+  final ValueChanged<_DockArm> onArm;
+  final ValueChanged<_DockArm> onRecall;
+
+  @override
+  Widget build(BuildContext context) {
+    final limit = is3v3Mode ? 3 : 5;
+    final chips = <Widget>[
+      for (var i = 0; i < limit; i++)
+        _DockChip(
+          key: Key('chip-o-$i'),
+          label: '${i + 1}',
+          color: const Color(0xFFE23B2F),
+          placed: i < offenseOn.length && offenseOn[i],
+          armed: armed != null &&
+              armed!.kind == _DockKind.offense &&
+              armed!.index == i,
+          onTap: () => _tap(_DockArm(_DockKind.offense, i), offenseOn[i]),
+        ),
+      for (var i = 0; i < limit; i++)
+        _DockChip(
+          key: Key('chip-d-$i'),
+          label: 'X${i + 1}',
+          color: const Color(0xFF2F3E52),
+          placed: i < defenseOn.length && defenseOn[i],
+          armed: armed != null &&
+              armed!.kind == _DockKind.defense &&
+              armed!.index == i,
+          onTap: () => _tap(_DockArm(_DockKind.defense, i), defenseOn[i]),
+        ),
+      _DockChip(
+        key: const Key('chip-ball'),
+        label: '球',
+        color: const Color(0xFFE86100),
+        placed: ballOn,
+        armed: armed != null && armed!.kind == _DockKind.ball,
+        onTap: () => _tap(const _DockArm(_DockKind.ball, 0), ballOn),
+      ),
+    ];
+    return Container(
+      color: const Color(0xFF0C1018),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
+      child: SizedBox(
+        height: 46,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: chips.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 6),
+          itemBuilder: (_, index) => chips[index],
+        ),
+      ),
+    );
+  }
+
+  void _tap(_DockArm arm, bool placed) {
+    if (placed) {
+      onRecall(arm);
+    } else {
+      onArm(arm);
+    }
+  }
+}
+
+class _DockChip extends StatelessWidget {
+  const _DockChip({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.placed,
+    required this.armed,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color color;
+  final bool placed;
+  final bool armed;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: placed ? '收回 $label' : '放上 $label',
+      child: Material(
+        color: placed ? color.withValues(alpha: 0.28) : color,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            width: label.length > 1 ? 46 : 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: armed ? Colors.white : Colors.white24,
+                width: armed ? 2 : 1,
+              ),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: placed ? Colors.white54 : Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PlayboardToolbar extends StatelessWidget {
   const _PlayboardToolbar({
     required this.canUndo,
@@ -1508,6 +1945,12 @@ class _PlayboardToolbar extends StatelessWidget {
                         accent: const Color(0xFFF26A21),
                         selected: selectedTool == DrawTool.shoot,
                         onPressed: () => onSelectTool(DrawTool.shoot),
+                      ),
+                      _ToolButton(
+                        icon: Icons.auto_fix_off_rounded,
+                        label: 'Erase',
+                        selected: selectedTool == DrawTool.erase,
+                        onPressed: () => onSelectTool(DrawTool.erase),
                       ),
                     ],
                   ),
@@ -1642,6 +2085,8 @@ class CourtPainter extends CustomPainter {
     required this.defense,
     required this.drawnLines,
     required this.playerRadius,
+    this.offenseOnCourt = const [],
+    this.defenseOnCourt = const [],
     this.activeStroke,
     this.draggingIndex,
     this.draggingDefense = false,
@@ -1656,6 +2101,8 @@ class CourtPainter extends CustomPainter {
   final Rect courtRect;
   final List<Offset> offense;
   final List<Offset> defense;
+  final List<bool> offenseOnCourt;
+  final List<bool> defenseOnCourt;
   final List<DrawnLine> drawnLines;
   final DrawnLine? activeStroke;
   final double playerRadius;
@@ -1983,6 +2430,11 @@ class CourtPainter extends CustomPainter {
 
   int get _visiblePlayerCount => is3v3Mode ? 3 : 5;
 
+  bool _pieceOn(List<bool> flags, int index) {
+    if (index < 0 || index >= flags.length) return flags.isEmpty;
+    return flags[index];
+  }
+
   Map<int, List<Offset>> _assignPaths({required bool defenseTeam}) {
     final assigned = assignMovingPaths(
       lines: drawnLines,
@@ -1990,6 +2442,8 @@ class CourtPainter extends CustomPainter {
       defense: defense,
       court: courtRect,
       visibleCount: _visiblePlayerCount,
+      offenseActive: offenseOnCourt.isEmpty ? null : offenseOnCourt,
+      defenseActive: defenseOnCourt.isEmpty ? null : defenseOnCourt,
     );
     return defenseTeam ? assigned.defense : assigned.offense;
   }
@@ -2041,7 +2495,9 @@ class CourtPainter extends CustomPainter {
     }
     if (ballCarrierId != null) {
       final index = ballCarrierId! - 1;
-      if (index >= 0 && index < offense.length) {
+      if (index >= 0 &&
+          index < offense.length &&
+          _pieceOn(offenseOnCourt, index)) {
         final display = _displayPosition(offense[index], index, defense: false);
         final center = CourtGeometry.normalizedToCanvas(display, courtRect);
         return center + Offset(playerRadius * 0.58, playerRadius * 0.58);
@@ -2088,6 +2544,7 @@ class CourtPainter extends CustomPainter {
   void _drawOffense(Canvas canvas) {
     final count = math.min(_visiblePlayerCount, offense.length);
     for (var i = 0; i < count; i++) {
+      if (!_pieceOn(offenseOnCourt, i)) continue;
       final selected = !draggingDefense && i == draggingIndex;
       final display = _displayPosition(offense[i], i, defense: false);
       final center = CourtGeometry.normalizedToCanvas(display, courtRect);
@@ -2119,6 +2576,7 @@ class CourtPainter extends CustomPainter {
   void _drawDefense(Canvas canvas) {
     final count = math.min(_visiblePlayerCount, defense.length);
     for (var i = 0; i < count; i++) {
+      if (!_pieceOn(defenseOnCourt, i)) continue;
       final selected = draggingDefense && i == draggingIndex;
       final display = _displayPosition(defense[i], i, defense: true);
       final center = CourtGeometry.normalizedToCanvas(display, courtRect);
@@ -2197,7 +2655,17 @@ class CourtPainter extends CustomPainter {
         oldDelegate.ballCarrierId != ballCarrierId ||
         oldDelegate.standaloneBallPosition != standaloneBallPosition ||
         oldDelegate.draggingBall != draggingBall ||
-        oldDelegate.ballDragPosition != ballDragPosition;
+        oldDelegate.ballDragPosition != ballDragPosition ||
+        !_sameFlags(oldDelegate.offenseOnCourt, offenseOnCourt) ||
+        !_sameFlags(oldDelegate.defenseOnCourt, defenseOnCourt);
+  }
+
+  bool _sameFlags(List<bool> a, List<bool> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   bool _samePlayers(List<Offset> a, List<Offset> b) {

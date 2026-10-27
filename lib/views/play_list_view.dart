@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:hooplab_3d/data/playbook_data.dart';
 import 'package:hooplab_3d/models/playbook_model.dart';
 import 'package:hooplab_3d/views/playboard_view.dart';
+import 'package:hooplab_3d/views/saved_plays_view.dart';
 
 class PlayListView extends StatelessWidget {
   const PlayListView({super.key, required this.category});
@@ -11,6 +12,20 @@ class PlayListView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (category == PlaybookCategory.mine) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0E1116),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF12161E),
+          foregroundColor: Colors.white,
+          title: Text(
+            category,
+            style: GoogleFonts.notoSansTc(fontWeight: FontWeight.w800),
+          ),
+        ),
+        body: const SavedPlaysView(),
+      );
+    }
     final plays = PlaybookRepository.playsForCategory(category);
     return Scaffold(
       backgroundColor: const Color(0xFF0E1116),

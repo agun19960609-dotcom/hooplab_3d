@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:hooplab_3d/data/local_playbook.dart';
 import 'package:hooplab_3d/data/playbook_data.dart';
 import 'package:hooplab_3d/models/playbook_model.dart';
 import 'package:hooplab_3d/views/play_list_view.dart';
@@ -12,6 +13,11 @@ class HomeDashboardView extends StatelessWidget {
       title: PlaybookCategory.halfCourt,
       icon: Icons.sports_basketball_rounded,
       color: Color(0xFFE86100),
+    ),
+    _CategoryCardData(
+      title: PlaybookCategory.fastBreak,
+      icon: Icons.speed_rounded,
+      color: Color(0xFF7A4DFF),
     ),
     _CategoryCardData(
       title: PlaybookCategory.inbound,
@@ -115,6 +121,9 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (data.title == PlaybookCategory.mine) {
+      return _MineCategoryCard(data: data);
+    }
     final count = PlaybookRepository.playsForCategory(data.title).length;
     return Material(
       color: Colors.transparent,
@@ -184,6 +193,87 @@ class _CategoryCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _MineCategoryCard extends StatefulWidget {
+  const _MineCategoryCard({required this.data});
+
+  final _CategoryCardData data;
+
+  @override
+  State<_MineCategoryCard> createState() => _MineCategoryCardState();
+}
+
+class _MineCategoryCardState extends State<_MineCategoryCard> {
+  @override
+  void initState() {
+    super.initState();
+    LocalPlaybook.instance.ensureLoaded();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: LocalPlaybook.instance,
+      builder: (context, _) {
+        final count = LocalPlaybook.instance.plays.length;
+        final data = widget.data;
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PlayListView(category: data.title),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(22),
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(22),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color.lerp(data.color, Colors.white, 0.08)!,
+                    Color.lerp(data.color, Colors.black, 0.28)!,
+                  ],
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.folder_special_rounded, color: Colors.white),
+                    const Spacer(),
+                    Text(
+                      data.title,
+                      style: GoogleFonts.notoSansTc(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$count 套',
+                      style: GoogleFonts.notoSansTc(
+                        color: Colors.white.withValues(alpha: 0.78),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
