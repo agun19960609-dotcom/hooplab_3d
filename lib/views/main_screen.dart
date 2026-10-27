@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hooplab_3d/views/home_dashboard_view.dart';
 import 'package:hooplab_3d/views/playboard_view.dart';
+import 'package:hooplab_3d/views/saved_plays_view.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -15,11 +16,7 @@ class _MainScreenState extends State<MainScreen> {
 
   static const _pages = <Widget>[
     HomeDashboardView(),
-    _PlaceholderTab(
-      title: '戰術庫',
-      subtitle: '稍後會在這裡瀏覽已儲存的戰術。',
-      icon: Icons.inventory_2_outlined,
-    ),
+    const SavedPlaysView(),
     PlayboardView(),
     _PlaceholderTab(
       title: '設定',

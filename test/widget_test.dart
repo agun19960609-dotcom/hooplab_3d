@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hooplab_3d/data/local_playbook.dart';
 import 'package:hooplab_3d/data/playbook_data.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hooplab_3d/main.dart';
 import 'package:hooplab_3d/models/playbook_model.dart';
 import 'package:hooplab_3d/models/playbook_models.dart';
@@ -24,12 +26,29 @@ Future<void> openBoard(WidgetTester tester) async {
 
 void main() {
   setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    LocalPlaybook.instance
+      ..ready = false
+      ..plays = const [];
     WebViewPlatform.instance = _FakeWebViewPlatform();
   });
 
-  test('playbook repository has ten playable plays per category', () {
-    expect(PlaybookRepository.allPlays, hasLength(60));
-    for (final category in PlaybookCategory.all) {
+  test('playbook repository has a coach starter pack', () {
+    expect(
+      PlaybookRepository.playsForCategory(PlaybookCategory.halfCourt).length,
+      greaterThanOrEqualTo(14),
+    );
+    expect(
+      PlaybookRepository.playsForCategory(PlaybookCategory.fastBreak).length,
+      greaterThanOrEqualTo(8),
+    );
+    for (final category in [
+      PlaybookCategory.inbound,
+      PlaybookCategory.pressBreak,
+      PlaybookCategory.lastFive,
+      PlaybookCategory.defense,
+    ]) {
       final plays = PlaybookRepository.playsForCategory(category);
       expect(plays, hasLength(10), reason: category);
       final playbook = Playbook.fromJson(
@@ -38,6 +57,21 @@ void main() {
       expect(playbook.steps.length, greaterThanOrEqualTo(2));
       expect(playbook.steps.first.actions, isNotEmpty);
     }
+    expect(PlaybookRepository.playsForCategory(PlaybookCategory.mine), isEmpty);
+    final fast = Playbook.fromJson(
+      jsonDecode(
+        PlaybookRepository.playsForCategory(PlaybookCategory.fastBreak)
+            .first
+            .jsonData,
+      ) as Map<String, dynamic>,
+    );
+    final ys = [
+      for (final step in fast.steps)
+        for (final action in step.actions)
+          for (final point in action.path) point[1],
+    ];
+    expect(ys.any((y) => y > 0.7), isTrue);
+    expect(ys.any((y) => y < 0.2), isTrue);
     final spain = convertGrokToAppJson('西班牙擋拆');
     expect(spain, isNotNull);
     final converted = Playbook.fromJson(
@@ -119,6 +153,10 @@ void main() {
     const startNormalized = Offset(0.50, 0.42);
     final start = origin + CourtGeometry.normalizedToCanvas(startNormalized, court);
 
+    await tester.tap(find.byKey(const Key('chip-o-0')));
+    await tester.pump();
+    await tester.tapAt(start);
+    await tester.pump();
     await tester.dragFrom(start, const Offset(40, 60));
     await tester.pump();
 
@@ -208,11 +246,22 @@ void main() {
 
     final paintFinder = courtPaint();
     var painter = tester.widget<CustomPaint>(paintFinder).painter! as CourtPainter;
-    expect(painter.ballCarrierId, 1);
+    expect(painter.ballCarrierId, isNull);
+    expect(painter.offenseOnCourt[0], isFalse);
 
     final origin = tester.getTopLeft(paintFinder);
     final court = painter.courtRect;
     final player = CourtGeometry.normalizedToCanvas(const Offset(0.50, 0.42), court);
+    await tester.tap(find.byKey(const Key('chip-o-0')));
+    await tester.pump();
+    await tester.tapAt(origin + player);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('chip-ball')));
+    await tester.pump();
+    await tester.tapAt(origin + player);
+    await tester.pump();
+    painter = tester.widget<CustomPaint>(paintFinder).painter! as CourtPainter;
+    expect(painter.ballCarrierId, 1);
     final ballStart = origin + player + Offset(painter.playerRadius * 0.58, painter.playerRadius * 0.58);
 
     await tester.dragFrom(ballStart, const Offset(-180, 160));
@@ -273,6 +322,50 @@ void main() {
     expect(find.text('Step 1/1'), findsOneWidget);
     painter = tester.widget<CustomPaint>(paintFinder).painter! as CourtPainter;
     expect(painter.drawnLines, isNotEmpty);
+  });
+
+  testWidgets('dock chip places a player and can be recalled', (tester) async {
+    await openBoard(tester);
+    expect(find.byTooltip('放上 1'), findsOneWidget);
+    var painter = tester.widget<CustomPaint>(courtPaint()).painter! as CourtPainter;
+    expect(painter.offenseOnCourt[0], isFalse);
+
+    await tester.tap(find.byKey(const Key('chip-o-0')));
+    await tester.pump();
+    final origin = tester.getTopLeft(courtPaint());
+    final spot = origin + CourtGeometry.normalizedToCanvas(
+      const Offset(0.40, 0.50),
+      painter.courtRect,
+    );
+    await tester.tapAt(spot);
+    await tester.pump();
+
+    painter = tester.widget<CustomPaint>(courtPaint()).painter! as CourtPainter;
+    expect(painter.offenseOnCourt[0], isTrue);
+    expect(find.byTooltip('收回 1'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('chip-o-0')));
+    await tester.pump();
+    painter = tester.widget<CustomPaint>(courtPaint()).painter! as CourtPainter;
+    expect(painter.offenseOnCourt[0], isFalse);
+  });
+
+  testWidgets('saved plays can be renamed and deleted locally', (tester) async {
+    await LocalPlaybook.instance.save(
+      title: '測試進攻',
+      jsonData: buildBasicTwoStepJson('測試進攻'),
+    );
+    await tester.pumpWidget(const MyApp());
+    await tester.scrollUntilVisible(find.text('我的戰術'), 300);
+    await tester.tap(find.text('我的戰術'));
+    await tester.pumpAndSettle();
+    expect(find.text('測試進攻'), findsOneWidget);
+    expect(find.text('還沒有儲存的戰術'), findsNothing);
+
+    await tester.tap(find.byTooltip('刪除'));
+    await tester.pumpAndSettle();
+    expect(find.text('測試進攻'), findsNothing);
+    expect(find.text('還沒有儲存的戰術'), findsOneWidget);
   });
 }
 
