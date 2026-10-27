@@ -45,12 +45,18 @@ class _SavedPlaysViewState extends State<SavedPlaysView> {
             final play = plays[index];
             return Material(
               color: const Color(0xFF171C26),
-              borderRadius: BorderRadius.circular(16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: Color(0xFFD0D6E0)),
+              ),
               child: ListTile(
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => PlayboardView(initialPlayData: play.jsonData),
+                      builder: (_) => PlayboardView(
+                        initialPlayData: play.jsonData,
+                        playTitle: play.title,
+                      ),
                     ),
                   );
                 },
@@ -63,7 +69,7 @@ class _SavedPlaysViewState extends State<SavedPlaysView> {
                 ),
                 subtitle: Text(
                   '只存在這台裝置',
-                  style: GoogleFonts.notoSansTc(color: const Color(0xFFB8C0CC)),
+                  style: GoogleFonts.notoSansTc(color: const Color(0xFFE8EDF5)),
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,

@@ -147,6 +147,7 @@ class _CategoryCard extends StatelessWidget {
                 Color.lerp(data.color, Colors.black, 0.28)!,
               ],
             ),
+            border: Border.all(color: Colors.white, width: 1.4),
             boxShadow: [
               BoxShadow(
                 color: data.color.withValues(alpha: 0.28),
@@ -183,7 +184,7 @@ class _CategoryCard extends StatelessWidget {
                 Text(
                   '$count 套',
                   style: GoogleFonts.notoSansTc(
-                    color: Colors.white.withValues(alpha: 0.78),
+                    color: Colors.white,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
@@ -234,6 +235,7 @@ class _MineCategoryCardState extends State<_MineCategoryCard> {
             child: Ink(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white, width: 1.4),
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -262,7 +264,7 @@ class _MineCategoryCardState extends State<_MineCategoryCard> {
                     Text(
                       '$count 套',
                       style: GoogleFonts.notoSansTc(
-                        color: Colors.white.withValues(alpha: 0.78),
+                        color: Colors.white,
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),

@@ -58,13 +58,19 @@ class _PlayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: const Color(0xFF171C26),
-      borderRadius: BorderRadius.circular(16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFD0D6E0)),
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => PlayboardView(initialPlayData: play.jsonData),
+              builder: (_) => PlayboardView(
+                initialPlayData: play.jsonData,
+                playTitle: play.title,
+              ),
             ),
           );
         },
@@ -85,7 +91,7 @@ class _PlayCard extends StatelessWidget {
               Text(
                 play.englishTitle,
                 style: const TextStyle(
-                  color: Color(0xFFB8C0CC),
+                  color: Color(0xFFE8EDF5),
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
@@ -102,13 +108,14 @@ class _PlayCard extends StatelessWidget {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE86100).withValues(alpha: 0.16),
+                        color: const Color(0xFFE86100).withValues(alpha: 0.22),
                         borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: const Color(0xFFFFD2B0)),
                       ),
                       child: Text(
                         tag,
                         style: GoogleFonts.notoSansTc(
-                          color: const Color(0xFFFFB074),
+                          color: const Color(0xFFFFE8D6),
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
