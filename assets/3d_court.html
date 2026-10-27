@@ -26,9 +26,14 @@
   let currentStepIndex = 0;
   let isPlaying3D = true;
   var pendingPlaybookJson = null;
+  var pendingAutoplay = false;
   window.loadPlaybook = function (jsonString) {
     console.log('Received JSON in 3D:', jsonString);
     pendingPlaybookJson = jsonString;
+    pendingAutoplay = true;
+  };
+  window.startPlayback = function () {
+    pendingAutoplay = true;
   };
   window.loadModelFromBase64 = function () {};
   window.setCameraView = function (viewType) {
@@ -968,14 +973,16 @@
         return;
       }
       if (pose === 'screen') {
-        setRot(armL, -0.2, 0, -1.15);
-        setRot(armR, -0.2, 0, 1.15);
-        setRot(elbowL, -0.25, 0, 0);
-        setRot(elbowR, -0.25, 0, 0);
-        setRot(legL, 0, 0, -0.16);
-        setRot(legR, 0, 0, 0.16);
-        setRot(kneeL, 0.18, 0, 0);
-        setRot(kneeR, 0.18, 0, 0);
+        // Standing screen: wide base, hands together in front of the chest.
+        // +Z on the left arm and -Z on the right arm turn the arms inward.
+        setRot(armL, -0.4, 0, 0.8);
+        setRot(armR, -0.4, 0, -0.8);
+        setRot(elbowL, -1.5, 0, 0.12);
+        setRot(elbowR, -1.5, 0, -0.12);
+        setRot(legL, 0, 0, -0.22);
+        setRot(legR, 0, 0, 0.22);
+        setRot(kneeL, 0.34, 0, 0);
+        setRot(kneeR, 0.34, 0, 0);
         return;
       }
       if (pose === 'run' || moving) {
@@ -1093,6 +1100,27 @@
       actorsById[playerId] = actor;
     }
 
+    function pathTravel(path) {
+      if (!path || path.length < 2) return 0;
+      var dist = 0;
+      for (var i = 1; i < path.length; i++) {
+        dist += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+      }
+      return dist;
+    }
+
+    function durationFor(moves, pass, shoot) {
+      var longest = 0;
+      for (var id in moves) {
+        longest = Math.max(longest, pathTravel(moves[id]));
+      }
+      if (pass && pass.length > 1) longest = Math.max(longest, 10);
+      if (shoot) longest = Math.max(longest, 14);
+      // A setup step with almost no travel should not sit for five seconds.
+      if (longest < 2.5) return 1.05;
+      return Math.max(2.05, Math.min(3.5, 1.25 + longest / 14));
+    }
+
     function parseStep(raw) {
       var starts = {};
       var moves = {};
@@ -1170,6 +1198,7 @@
         shooterId: shooter,
         passTargetId: passTarget,
         routes: routes,
+        duration: durationFor(moves, pass, shoot),
       };
     }
 
@@ -1335,7 +1364,21 @@
       }
       applyCurrentStep();
       framePlayers();
+      isPlaying3D = true;
+      clock.getDelta();
       console.log('Loaded steps:', playbookSteps.length, 'players:', actors.length);
+    }
+
+    function beginPlayback() {
+      if (!playbookSteps.length) return;
+      currentStepIndex = 0;
+      progress = 0;
+      isPlaying3D = true;
+      shotOrigin = null;
+      shotHoop = null;
+      applyCurrentStep();
+      framePlayers();
+      clock.getDelta();
     }
 
     function updateBall(delta, phase) {
@@ -1431,8 +1474,12 @@
       requestAnimationFrame(animate);
       window.__frames = (window.__frames || 0) + 1;
       var delta = clock.getDelta();
+      var stepDur = duration;
+      if (playbookSteps[currentStepIndex] && playbookSteps[currentStepIndex].duration) {
+        stepDur = playbookSteps[currentStepIndex].duration;
+      }
       if (isPlaying3D && playbookSteps.length) {
-        progress += delta / duration;
+        progress += delta / stepDur;
         if (progress >= 1.0) {
           if (currentStepIndex < playbookSteps.length - 1) {
             currentStepIndex += 1;
@@ -1471,6 +1518,7 @@
     animate();
 
     window.loadPlaybook = applyPlaybook;
+    window.startPlayback = beginPlayback;
     window.__debugState = function () {
       var phase = phaseAt(Math.max(0, Math.min(1, progress)));
       return {
@@ -1547,6 +1595,28 @@
       if (a && b) sep = Math.round(Math.hypot(a.mesh.position.x - b.mesh.position.x, a.mesh.position.z - b.mesh.position.z) * 10) / 10;
       return { sep15: sep, players: rows };
     };
+    window.__hands = function (id) {
+      var actor = actorsById[id];
+      if (!actor) return null;
+      actor.mesh.updateMatrixWorld(true);
+      var inv = new THREE.Matrix4().copy(actor.mesh.matrixWorld).invert();
+      function local(name) {
+        var node = actor.mesh.getObjectByName(name);
+        if (!node) return null;
+        var p = new THREE.Vector3();
+        node.getWorldPosition(p);
+        p.applyMatrix4(inv);
+        return [Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100, Math.round(p.z * 100) / 100];
+      }
+      return {
+        action: actor.actionType,
+        handL: local('handL'),
+        handR: local('handR'),
+        chest: local('chestHold'),
+        rx: Math.round(actor.mesh.rotation.x * 1000) / 1000,
+        rz: Math.round(actor.mesh.rotation.z * 1000) / 1000,
+      };
+    };
     window.__seek = function (step, t) {
       if (!playbookSteps.length) return null;
       currentStepIndex = Math.max(0, Math.min(playbookSteps.length - 1, Number(step) || 0));
@@ -1586,21 +1656,25 @@
         playName: 'Spain Pick & Roll',
         steps: [
           step(1, [
-            { id: 1, actionType: 'move', path: [[200, 320], [200, 300]] },
-            { id: 2, actionType: 'move', path: [[60, 280]] },
-            { id: 3, actionType: 'move', path: [[340, 280]] },
-            { id: 4, actionType: 'move', path: [[120, 120]] },
-            { id: 5, actionType: 'move', path: [[200, 160]] },
+            { id: 1, actionType: 'run', path: [[200, 320], [248, 236]] },
+            { id: 5, actionType: 'screen', path: [[188, 168], [296, 204]] },
+            { id: 4, actionType: 'run', path: [[372, 36], [328, 118]] },
+            { id: 2, actionType: 'run', path: [[52, 210], [58, 178]] },
+            { id: 3, actionType: 'move', path: [[24, 40]] },
           ]),
           step(1, [
-            { id: 1, actionType: 'run', path: [[200, 300], [150, 248]] },
-            { id: 5, actionType: 'screen', path: [[200, 160], [198, 236]] },
-            { id: 4, actionType: 'run', path: [[120, 120], [230, 95]] },
+            { id: 1, actionType: 'run', path: [[248, 236], [330, 180]] },
+            { id: 5, actionType: 'run', path: [[296, 204], [214, 78]] },
+            { id: 4, actionType: 'screen', path: [[328, 118], [230, 180]] },
+            { id: 2, actionType: 'move', path: [[58, 178]] },
+            { id: 3, actionType: 'run', path: [[24, 40], [40, 78]] },
           ]),
           step(1, [
-            { id: 1, actionType: 'pass', path: [[150, 248], [230, 95]] },
-            { id: 4, actionType: 'shoot', path: [[230, 95], [200, 40]] },
-            { id: 5, actionType: 'run', path: [[198, 236], [165, 120]] },
+            { id: 1, actionType: 'pass', path: [[330, 180], [214, 78]] },
+            { id: 5, actionType: 'shoot', path: [[214, 78], [200, 22]] },
+            { id: 4, actionType: 'run', path: [[230, 180], [374, 52]] },
+            { id: 2, actionType: 'run', path: [[58, 178], [74, 204]] },
+            { id: 3, actionType: 'move', path: [[40, 78]] },
           ]),
         ],
       };
@@ -1648,6 +1722,7 @@
       pendingPlaybookJson = null;
     }
     runPreviewFromQuery();
+    if (pendingAutoplay) beginPlayback();
     window.__ready = true;
 
     console.log('Three.js Scene Initialized Successfully');
