@@ -20,17 +20,17 @@ const _grokHalfCourtJson = r'''
       {
         "ballCarrierId": 1,
         "players": [
-          {"id": 1, "team": "red", "number": "1", "actionType": "run", "path": [{"x": 200, "y": 300}, {"x": 170, "y": 240}]},
-          {"id": 5, "team": "red", "number": "5", "actionType": "screen", "path": [{"x": 200, "y": 160}, {"x": 175, "y": 230}]},
-          {"id": 4, "team": "red", "number": "4", "actionType": "run", "path": [{"x": 120, "y": 120}, {"x": 190, "y": 90}]}
+          {"id": 1, "team": "red", "number": "1", "actionType": "run", "path": [{"x": 200, "y": 300}, {"x": 150, "y": 248}]},
+          {"id": 5, "team": "red", "number": "5", "actionType": "screen", "path": [{"x": 200, "y": 160}, {"x": 198, "y": 236}]},
+          {"id": 4, "team": "red", "number": "4", "actionType": "run", "path": [{"x": 120, "y": 120}, {"x": 230, "y": 95}]}
         ]
       },
       {
         "ballCarrierId": 1,
         "players": [
-          {"id": 1, "team": "red", "number": "1", "actionType": "pass", "path": [{"x": 170, "y": 240}, {"x": 190, "y": 90}]},
-          {"id": 4, "team": "red", "number": "4", "actionType": "shoot", "path": [{"x": 190, "y": 90}, {"x": 200, "y": 40}]},
-          {"id": 5, "team": "red", "number": "5", "actionType": "run", "path": [{"x": 175, "y": 230}, {"x": 210, "y": 100}]}
+          {"id": 1, "team": "red", "number": "1", "actionType": "pass", "path": [{"x": 150, "y": 248}, {"x": 230, "y": 95}]},
+          {"id": 4, "team": "red", "number": "4", "actionType": "shoot", "path": [{"x": 230, "y": 95}, {"x": 200, "y": 40}]},
+          {"id": 5, "team": "red", "number": "5", "actionType": "run", "path": [{"x": 198, "y": 236}, {"x": 165, "y": 120}]}
         ]
       }
     ]
