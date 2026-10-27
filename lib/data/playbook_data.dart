@@ -6,6 +6,8 @@ import 'package:hooplab_3d/models/playbook_model.dart';
 part 'grok_half_court.dart';
 
 class PlaybookRepository {
+  static const featuredId = 'half-01';
+
   static List<BasketballPlay> get allPlays => List<BasketballPlay>.unmodifiable(
         _plays,
       );
@@ -13,6 +15,15 @@ class PlaybookRepository {
   static List<BasketballPlay> playsForCategory(String category) {
     return _plays.where((play) => play.category == category).toList();
   }
+
+  static BasketballPlay? playById(String id) {
+    for (final play in _plays) {
+      if (play.id == id) return play;
+    }
+    return null;
+  }
+
+  static BasketballPlay? get featured => playById(featuredId);
 }
 
 const _o1 = <double>[0.50, 0.42];

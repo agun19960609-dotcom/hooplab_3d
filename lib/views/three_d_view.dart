@@ -2,14 +2,18 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:hooplab_3d/export/reel_exporter.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 class ThreeDView extends StatefulWidget {
-  const ThreeDView({super.key, required this.playbookJson});
+  const ThreeDView({
+    super.key,
+    required this.playbookJson,
+    this.playTitle = 'HOOPLAB',
+  });
 
   final String playbookJson;
+  final String playTitle;
 
   @override
   State<ThreeDView> createState() => _ThreeDViewState();
@@ -54,25 +58,11 @@ class _ThreeDViewState extends State<ThreeDView> {
   }
 
   Future<void> _shareReel() async {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
+    await presentPlayReel(
+      context,
+      playbookJson: widget.playbookJson,
+      title: widget.playTitle,
     );
-    try {
-      final file = await ReelExporter.exportJson(widget.playbookJson);
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'video/mp4', name: 'hooplab.mp4')],
-        text: 'Hooplab',
-        sharePositionOrigin: shareSheetOrigin(context),
-      );
-    } catch (err) {
-      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      debugPrint('3D reel export failed: $err');
-    }
   }
 
   Future<void> _injectAssetsAndPlaybook() async {

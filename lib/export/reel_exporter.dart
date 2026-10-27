@@ -9,14 +9,62 @@ import 'package:hooplab_3d/export/play_replay.dart';
 import 'package:hooplab_3d/views/playboard_view.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// iPad share sheets need a source rectangle. Phones ignore it.
 Rect shareSheetOrigin(BuildContext context) {
   final box = context.findRenderObject() as RenderBox?;
-  if (box == null || !box.attached || !box.hasSize) {
+  if (box == null || !box.attached || !box.hasSize || box.size.shortestSide < 1) {
     return const Rect.fromLTWH(0, 0, 1, 1);
   }
   return box.localToGlobal(Offset.zero) & box.size;
+}
+
+String reelShareTitle(String title) {
+  final trimmed = title.trim();
+  if (trimmed.isEmpty || trimmed == 'Playboard Export') return 'HOOPLAB';
+  return trimmed;
+}
+
+/// Paints a portrait reel and opens the system share sheet with [title].
+/// Returns false when the file could not be made. Does not require an account.
+Future<bool> presentPlayReel(
+  BuildContext context, {
+  required String playbookJson,
+  required String title,
+}) async {
+  final origin = shareSheetOrigin(context);
+  final shareTitle = reelShareTitle(title);
+  var spinner = false;
+  try {
+    if (!context.mounted) return false;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+    spinner = true;
+    final file = await ReelExporter.exportJson(playbookJson);
+    if (context.mounted && spinner) {
+      Navigator.of(context, rootNavigator: true).pop();
+      spinner = false;
+    }
+    if (!context.mounted) return false;
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'video/mp4', name: 'hooplab.mp4')],
+      text: shareTitle,
+      subject: shareTitle,
+      sharePositionOrigin: origin,
+    );
+    return true;
+  } catch (err) {
+    if (spinner && context.mounted) {
+      final navigator = Navigator.of(context, rootNavigator: true);
+      if (navigator.canPop()) navigator.pop();
+    }
+    debugPrint('Reel share failed: $err');
+    return false;
+  }
 }
 
 class ReelExporter {

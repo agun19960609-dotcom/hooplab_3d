@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hooplab_3d/data/launch_prefs.dart';
 import 'package:hooplab_3d/data/local_playbook.dart';
 import 'package:hooplab_3d/data/playbook_data.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,7 +28,12 @@ Future<void> openBoard(WidgetTester tester) async {
 void main() {
   setUp(() {
     TestWidgetsFlutterBinding.ensureInitialized();
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      LaunchPrefs.seenOnboardingKey: true,
+    });
+    LaunchPrefs
+      ..ready = true
+      ..seenOnboarding = true;
     LocalPlaybook.instance
       ..ready = false
       ..plays = const [];
@@ -85,6 +91,7 @@ void main() {
     expect(firstPath[0], closeTo((200 / 400.0) * 0.8 + 0.1, 0.0001));
     expect(firstPath[1], closeTo((320 / 400.0) * 0.40 + 0.06, 0.0001));
     expect(convertGrokToAppJson('不存在的戰術'), isNull);
+    expect(PlaybookRepository.featured?.title, '西班牙擋拆');
   });
 
   test('getPositionAlongPath interpolates along polyline segments', () {
@@ -362,10 +369,63 @@ void main() {
     expect(find.text('測試進攻'), findsOneWidget);
     expect(find.text('還沒有儲存的戰術'), findsNothing);
 
+    await tester.tap(find.byTooltip('重新命名'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '改名進攻');
+    await tester.tap(find.text('儲存'));
+    await tester.pumpAndSettle();
+    expect(find.text('改名進攻'), findsOneWidget);
+
     await tester.tap(find.byTooltip('刪除'));
     await tester.pumpAndSettle();
-    expect(find.text('測試進攻'), findsNothing);
+    expect(find.text('改名進攻'), findsNothing);
     expect(find.text('還沒有儲存的戰術'), findsOneWidget);
+  });
+
+  testWidgets('first open points at the featured play', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    LaunchPrefs
+      ..ready = true
+      ..seenOnboarding = false;
+    await tester.pumpWidget(const MyApp());
+    expect(find.text('30 秒上手'), findsOneWidget);
+
+    await tester.tap(find.text('看西班牙擋拆'));
+    await tester.pumpAndSettle();
+
+    expect(LaunchPrefs.seenOnboarding, isTrue);
+    expect(find.textContaining('西班牙擋拆。下一步：按 3D'), findsOneWidget);
+    expect(find.byTooltip('3D Preview'), findsOneWidget);
+    expect(find.byTooltip('分享影片'), findsOneWidget);
+  });
+
+  testWidgets('settings opens the local privacy policy', (tester) async {
+    await tester.pumpWidget(const MyApp());
+    await tester.tap(find.text('設定'));
+    await tester.pumpAndSettle();
+    expect(find.text(LaunchPrefs.supportEmail), findsOneWidget);
+    await tester.tap(find.text('隱私權政策'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('不會上傳'), findsWidgets);
+  });
+
+  testWidgets('a named play keeps its title in the 3D export', (tester) async {
+    final play = PlaybookRepository.featured!;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PlayboardView(
+          initialPlayData: play.jsonData,
+          playTitle: play.title,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('3D Preview'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final view = tester.widget<ThreeDView>(find.byType(ThreeDView));
+    expect(view.playTitle, '西班牙擋拆');
+    expect(view.playbookJson, contains('"playName": "西班牙擋拆"'));
   });
 }
 

@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:hooplab_3d/data/local_playbook.dart';
 import 'package:hooplab_3d/export/reel_exporter.dart';
 import 'package:hooplab_3d/models/playbook_models.dart';
+import 'package:hooplab_3d/theme/hooplab_theme.dart';
 import 'package:hooplab_3d/views/three_d_view.dart';
-import 'package:share_plus/share_plus.dart';
 
 /// NBA full-court proportions in feet, fitted uniformly to the paint area.
 class CourtGeometry {
@@ -362,9 +362,16 @@ double passFlight(double t) {
 }
 
 class PlayboardView extends StatefulWidget {
-  const PlayboardView({super.key, this.initialPlayData});
+  const PlayboardView({
+    super.key,
+    this.initialPlayData,
+    this.playTitle,
+    this.launchHint = false,
+  });
 
   final String? initialPlayData;
+  final String? playTitle;
+  final bool launchHint;
 
   @override
   State<PlayboardView> createState() => _PlayboardViewState();
@@ -392,6 +399,8 @@ class _PlayboardViewState extends State<PlayboardView>
   double playbackSpeed = 1.0;
   int? ballCarrierId;
   Offset? standaloneBallPosition;
+  late String _playTitle;
+  bool _showLaunchHint = false;
   DrawnLine? _activeStroke;
   int? _draggingIndex;
   bool _draggingDefense = false;
@@ -414,6 +423,9 @@ class _PlayboardViewState extends State<PlayboardView>
     _playbackController.addListener(() {
       setState(() => currentProgress = _playbackController.value);
     });
+    final requestedTitle = widget.playTitle?.trim() ?? '';
+    _playTitle = requestedTitle.isEmpty ? 'Playboard Export' : requestedTitle;
+    _showLaunchHint = widget.launchHint;
     _playbackController.addStatusListener((status) {
       if (status != AnimationStatus.completed || !mounted) return;
       if (currentFrameIndex < frames.length - 1) {
@@ -633,6 +645,34 @@ class _PlayboardViewState extends State<PlayboardView>
       ),
       body: Column(
         children: [
+          if (_showLaunchHint)
+            Material(
+              color: const Color(0xFF2A2118),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.touch_app_outlined, color: HooplabColors.text),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '$_playTitle。下一步：按 3D，再分享影片',
+                        style: const TextStyle(
+                          color: HooplabColors.text,
+                          fontWeight: FontWeight.w700,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '關閉提示',
+                      onPressed: () => setState(() => _showLaunchHint = false),
+                      icon: const Icon(Icons.close, color: HooplabColors.text),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -964,7 +1004,7 @@ class _PlayboardViewState extends State<PlayboardView>
         ),
       );
     }
-    return Playbook(playName: 'Playboard Export', steps: steps);
+    return Playbook(playName: _playTitle, steps: steps);
   }
 
   String exportToJson() {
@@ -975,9 +1015,13 @@ class _PlayboardViewState extends State<PlayboardView>
   void _open3DPreview() {
     final json = exportToJson();
     debugPrint(json);
+    setState(() => _showLaunchHint = false);
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => ThreeDView(playbookJson: json),
+        builder: (context) => ThreeDView(
+          playbookJson: json,
+          playTitle: _playTitle,
+        ),
       ),
     );
   }
@@ -1329,7 +1373,8 @@ class _PlayboardViewState extends State<PlayboardView>
   }
 
   Future<void> _savePlay() async {
-    final controller = TextEditingController(text: '我的戰術');
+    final suggested = _playTitle == 'Playboard Export' ? '我的戰術' : _playTitle;
+    final controller = TextEditingController(text: suggested);
     final title = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1341,7 +1386,7 @@ class _PlayboardViewState extends State<PlayboardView>
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
             hintText: '戰術名稱',
-            hintStyle: TextStyle(color: Colors.white38),
+            hintStyle: TextStyle(color: HooplabColors.textMuted),
           ),
         ),
         actions: [
@@ -1364,26 +1409,13 @@ class _PlayboardViewState extends State<PlayboardView>
   }
 
   Future<void> _shareReel() async {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
+    setState(() => _showLaunchHint = false);
+    final saved = await presentPlayReel(
+      context,
+      playbookJson: exportToJson(),
+      title: _playTitle,
     );
-    try {
-      final file = await ReelExporter.exportJson(exportToJson());
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'video/mp4', name: 'hooplab.mp4')],
-        text: 'Hooplab',
-        sharePositionOrigin: shareSheetOrigin(context),
-      );
-    } catch (err) {
-      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      if (mounted) _notify('影片沒有完成');
-      debugPrint('Reel export failed: $err');
-    }
+    if (!saved && mounted) _notify('影片沒有完成');
   }
 
   _BoardSnapshot _snapshot() {
