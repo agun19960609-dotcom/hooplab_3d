@@ -624,11 +624,18 @@
 
     function facePoint(group, point) {
       if (!group || !point) return;
-      var target = new THREE.Vector3(point.x, group.position.y + 3.6, point.z);
-      if (Math.abs(group.position.x - target.x) < 0.04 && Math.abs(group.position.z - target.z) < 0.04) {
-        return;
-      }
-      group.lookAt(target);
+      var dx = point.x - group.position.x;
+      var dz = point.z - group.position.z;
+      if (dx * dx + dz * dz < 0.04) return;
+      // Yaw only. lookAt pitches the whole body toward a nearby point and
+      // lays screeners flat on the court.
+      group.rotation.set(0, Math.atan2(dx, dz), 0);
+    }
+
+    function keepUpright(group) {
+      if (!group) return;
+      group.rotation.x = 0;
+      group.rotation.z = 0;
     }
 
     function faceHoop(group) {
@@ -961,14 +968,14 @@
         return;
       }
       if (pose === 'screen') {
-        setRot(armL, -0.35, 0, -1.25);
-        setRot(armR, -0.35, 0, 1.25);
-        setRot(elbowL, -0.2, 0, 0);
-        setRot(elbowR, -0.2, 0, 0);
-        setRot(legL, -0.28, 0, -0.14);
-        setRot(legR, -0.28, 0, 0.14);
-        setRot(kneeL, 0.5, 0, 0);
-        setRot(kneeR, 0.5, 0, 0);
+        setRot(armL, -0.2, 0, -1.15);
+        setRot(armR, -0.2, 0, 1.15);
+        setRot(elbowL, -0.25, 0, 0);
+        setRot(elbowR, -0.25, 0, 0);
+        setRot(legL, 0, 0, -0.16);
+        setRot(legR, 0, 0, 0.16);
+        setRot(kneeL, 0.18, 0, 0);
+        setRot(kneeR, 0.18, 0, 0);
         return;
       }
       if (pose === 'run' || moving) {
@@ -988,44 +995,46 @@
     }
 
     function faceScreenLine(actor) {
-      if (!actor || !actor.mesh || !actor.path || actor.path.length < 2) {
-        if (actor && actor.mesh) faceHoop(actor.mesh);
+      if (!actor || !actor.mesh) return;
+      var handler = null;
+      if (ballCarrierId != null && actorsById[ballCarrierId] && actorsById[ballCarrierId] !== actor) {
+        handler = actorsById[ballCarrierId];
+      }
+      if (handler) {
+        facePoint(actor.mesh, handler.mesh.position);
+        keepUpright(actor.mesh);
+        return;
+      }
+      if (!actor.path || actor.path.length < 2) {
+        faceHoop(actor.mesh);
         return;
       }
       var from = actor.path[actor.path.length - 2];
       var end = actor.path[actor.path.length - 1];
-      var dir = new THREE.Vector3(end.x - from.x, 0, end.z - from.z);
-      if (dir.lengthSq() < 0.0001) {
+      var dx = end.x - from.x;
+      var dz = end.z - from.z;
+      if (dx * dx + dz * dz < 0.0001) {
         faceHoop(actor.mesh);
         return;
       }
-      dir.normalize();
-      var target = actor.mesh.position.clone().add(dir);
-      facePoint(actor.mesh, target);
+      facePoint(actor.mesh, { x: actor.mesh.position.x - dz, z: actor.mesh.position.z + dx });
     }
 
     function faceActor(actor, phase) {
       if (!actor || !actor.mesh) return;
       if (actor.actionType === 'screen') {
         faceScreenLine(actor);
-        return;
-      }
-      if (actor.id === passerId && phase.name === 'pass') {
+      } else if (actor.id === passerId && phase.name === 'pass') {
         var recv = actorsById[receiverId];
-        if (recv) {
-          facePoint(actor.mesh, recv.mesh.position);
-          return;
-        }
-        if (passPath && passPath.length) {
-          facePoint(actor.mesh, passPath[passPath.length - 1]);
-          return;
-        }
-      }
-      if (actor.id === shooterId && (phase.name === 'gather' || phase.name === 'shoot')) {
+        if (recv) facePoint(actor.mesh, recv.mesh.position);
+        else if (passPath && passPath.length) facePoint(actor.mesh, passPath[passPath.length - 1]);
+        else faceHoop(actor.mesh);
+      } else if (actor.id === shooterId && (phase.name === 'gather' || phase.name === 'shoot')) {
         facePoint(actor.mesh, hoopForShot(actor.mesh.position));
-        return;
+      } else {
+        faceHoop(actor.mesh);
       }
-      faceHoop(actor.mesh);
+      keepUpright(actor.mesh);
     }
 
     function choosePose(actor, phase) {
@@ -1450,6 +1459,7 @@
         if (pose === 'catch') amount = Math.max(0.2, Math.min(1, (phase.u - 0.2) / 0.45));
         faceActor(actor, phase);
         applyPose(actor, pose, amount);
+        keepUpright(actor.mesh);
       }
 
       ensureBall();
@@ -1515,6 +1525,28 @@
         controls.update();
       }
     };
+    window.__posture = function () {
+      var rows = [];
+      for (var i = 0; i < actors.length; i++) {
+        var actor = actors[i];
+        actor.mesh.updateMatrixWorld(true);
+        var head = new THREE.Vector3(0, 6.1, 0).applyMatrix4(actor.mesh.matrixWorld);
+        rows.push({
+          id: actor.id,
+          action: actor.actionType,
+          rx: Math.round(actor.mesh.rotation.x * 1000) / 1000,
+          rz: Math.round(actor.mesh.rotation.z * 1000) / 1000,
+          headY: Math.round(head.y * 10) / 10,
+          x: Math.round(actor.mesh.position.x * 10) / 10,
+          z: Math.round(actor.mesh.position.z * 10) / 10,
+        });
+      }
+      var a = actorsById[1];
+      var b = actorsById[5];
+      var sep = null;
+      if (a && b) sep = Math.round(Math.hypot(a.mesh.position.x - b.mesh.position.x, a.mesh.position.z - b.mesh.position.z) * 10) / 10;
+      return { sep15: sep, players: rows };
+    };
     window.__seek = function (step, t) {
       if (!playbookSteps.length) return null;
       currentStepIndex = Math.max(0, Math.min(playbookSteps.length - 1, Number(step) || 0));
@@ -1561,14 +1593,14 @@
             { id: 5, actionType: 'move', path: [[200, 160]] },
           ]),
           step(1, [
-            { id: 1, actionType: 'run', path: [[200, 300], [170, 240]] },
-            { id: 5, actionType: 'screen', path: [[200, 160], [175, 230]] },
-            { id: 4, actionType: 'run', path: [[120, 120], [190, 90]] },
+            { id: 1, actionType: 'run', path: [[200, 300], [150, 248]] },
+            { id: 5, actionType: 'screen', path: [[200, 160], [198, 236]] },
+            { id: 4, actionType: 'run', path: [[120, 120], [230, 95]] },
           ]),
           step(1, [
-            { id: 1, actionType: 'pass', path: [[170, 240], [190, 90]] },
-            { id: 4, actionType: 'shoot', path: [[190, 90], [200, 40]] },
-            { id: 5, actionType: 'run', path: [[175, 230], [210, 100]] },
+            { id: 1, actionType: 'pass', path: [[150, 248], [230, 95]] },
+            { id: 4, actionType: 'shoot', path: [[230, 95], [200, 40]] },
+            { id: 5, actionType: 'run', path: [[198, 236], [165, 120]] },
           ]),
         ],
       };
