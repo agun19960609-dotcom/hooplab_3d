@@ -53,7 +53,9 @@ class _ThreeDViewState extends State<ThreeDView> {
 
   Future<void> _injectAssetsAndPlaybook() async {
     final payload = jsonEncode(widget.playbookJson);
-    await controller.runJavaScript('window.loadPlaybook($payload);');
+    await controller.runJavaScript(
+      'window.loadPlaybook($payload); if (window.startPlayback) window.startPlayback();',
+    );
   }
 
   @override
