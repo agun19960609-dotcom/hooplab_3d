@@ -89,12 +89,13 @@ class ReelExporter {
   static Future<Uint8List> _render(ReplayStep step) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
+    final frame = Size(width.toDouble(), height.toDouble());
     canvas.drawRect(
-      const Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+      Offset.zero & frame,
       Paint()..color = const Color(0xFF10141C),
     );
     final court = CourtGeometry.fitTo(
-      const Size(width.toDouble(), height.toDouble()),
+      frame,
       padding: 36,
     );
     CourtPainter(
@@ -108,14 +109,14 @@ class ReelExporter {
       currentProgress: step.progress,
       ballCarrierId: step.ballCarrierId,
       standaloneBallPosition: step.standaloneBall,
-    ).paint(canvas, const Size(width.toDouble(), height.toDouble()));
+    ).paint(canvas, frame);
     final title = ui.ParagraphBuilder(
       ui.ParagraphStyle(textAlign: TextAlign.center, fontSize: 22),
     )
       ..pushStyle(ui.TextStyle(color: const Color(0xFFF4F4F4)))
       ..addText(step.title);
     final paragraph = title.build()
-      ..layout(const ui.ParagraphConstraints(width: width.toDouble()));
+      ..layout(ui.ParagraphConstraints(width: frame.width));
     canvas.drawParagraph(paragraph, const Offset(0, 18));
     final picture = recorder.endRecording();
     final image = await picture.toImage(width, height);
