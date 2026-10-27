@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -53,15 +52,6 @@ class _ThreeDViewState extends State<ThreeDView> {
   }
 
   Future<void> _injectAssetsAndPlaybook() async {
-    try {
-      final ByteData data = await rootBundle.load('assets/models/player.glb');
-      final String base64 = base64Encode(data.buffer.asUint8List());
-      await controller.runJavaScript(
-        "window.loadModelFromBase64('data:model/gltf-binary;base64,$base64');",
-      );
-    } catch (err) {
-      debugPrint('Failed to inject player.glb: $err');
-    }
     final payload = jsonEncode(widget.playbookJson);
     await controller.runJavaScript('window.loadPlaybook($payload);');
   }

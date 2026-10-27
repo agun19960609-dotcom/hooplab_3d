@@ -60,8 +60,10 @@
       0.1,
       2000
     );
-    camera.position.set(0, 90, 120);
-    camera.lookAt(new THREE.Vector3(0, 0, 0));
+    var framedTarget = new THREE.Vector3(0, 3.2, -24);
+    var BASE_CAM_DISTANCE = 48;
+    camera.position.set(16, 28, 6);
+    camera.lookAt(framedTarget);
 
     var renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setClearColor(0x87ceeb);
@@ -71,10 +73,11 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
 
-    var ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    var ambient = new THREE.AmbientLight(0xffffff, 0.38);
     scene.add(ambient);
+    scene.add(new THREE.HemisphereLight(0xE7F0FF, 0xC4A574, 0.55));
 
-    var sun = new THREE.DirectionalLight(0xffffff, 0.95);
+    var sun = new THREE.DirectionalLight(0xfff4e5, 1.05);
     sun.position.set(30, 90, 40);
     sun.castShadow = true;
     sun.shadow.mapSize.width = 2048;
@@ -346,7 +349,7 @@
       );
       var rim = addShadowMesh(
         group,
-        new THREE.TorusGeometry(0.75, 0.055, 12, 32),
+        new THREE.TorusGeometry(0.78, 0.07, 12, 32),
         orange,
         0,
         RIM_HEIGHT,
@@ -354,6 +357,18 @@
         Math.PI / 2
       );
       rim.castShadow = true;
+
+      var net = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.74, 0.38, 1.25, 12, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: 0xF4F7FB,
+          wireframe: true,
+          transparent: true,
+          opacity: 0.9,
+        })
+      );
+      net.position.set(0, RIM_HEIGHT - 0.68, rimZ);
+      group.add(net);
 
       scene.add(group);
       return group;
@@ -373,12 +388,6 @@
       COURT_LENGTH / 2 - HOOP_FROM_BASELINE
     );
 
-    var hoopFocus = new THREE.Vector3(
-      0,
-      3.6,
-      HOOP_POSITION.z
-    );
-
     function hoopForShot(from) {
       if (!from) return HOOP_POSITION;
       var dTop = Math.abs(from.z - HOOP_POSITION.z);
@@ -386,24 +395,88 @@
       return dTop <= dSouth ? HOOP_POSITION : HOOP_POSITION_SOUTH;
     }
 
+    function makeBallTexture() {
+      var canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 128;
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#E86100';
+      ctx.fillRect(0, 0, 256, 128);
+      ctx.strokeStyle = '#1A1A1A';
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(128, 0);
+      ctx.lineTo(128, 128);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(58, 64, 46, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(198, 64, 46, 0, Math.PI * 2);
+      ctx.stroke();
+      var texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
+    }
+
+    var trailMeshes = [];
+    var trailHistory = [];
+
     function ensureBall() {
       if (ballMesh && ballMesh.parent === scene) return ballMesh;
       if (ballMesh && ballMesh.parent) ballMesh.parent.remove(ballMesh);
       ballMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.48, 24, 16),
+        new THREE.SphereGeometry(0.5, 24, 16),
         new THREE.MeshStandardMaterial({
-          color: 0xF25E22,
-          roughness: 0.45,
-          metalness: 0.08,
+          map: makeBallTexture(),
+          color: 0xffffff,
+          roughness: 0.55,
+          metalness: 0.02,
         })
       );
       ballMesh.name = 'basketball';
       ballMesh.castShadow = true;
       ballMesh.position.set(0, 1, 0);
       scene.add(ballMesh);
+      if (!trailMeshes.length) {
+        for (var t = 0; t < 8; t++) {
+          var ghost = new THREE.Mesh(
+            new THREE.SphereGeometry(0.28, 8, 6),
+            new THREE.MeshBasicMaterial({
+              color: 0xF25E22,
+              transparent: true,
+              opacity: 0.18,
+              depthWrite: false,
+            })
+          );
+          ghost.visible = false;
+          scene.add(ghost);
+          trailMeshes.push(ghost);
+        }
+      }
       return ballMesh;
     }
     ensureBall();
+
+    function pushTrail(pos, active) {
+      if (!active) {
+        trailHistory = [];
+        for (var i = 0; i < trailMeshes.length; i++) trailMeshes[i].visible = false;
+        return;
+      }
+      trailHistory.push(pos.clone());
+      if (trailHistory.length > trailMeshes.length) trailHistory.shift();
+      for (var n = 0; n < trailMeshes.length; n++) {
+        var sample = trailHistory[n];
+        if (!sample) {
+          trailMeshes[n].visible = false;
+          continue;
+        }
+        trailMeshes[n].visible = true;
+        trailMeshes[n].position.copy(sample);
+        trailMeshes[n].material.opacity = 0.08 + (n / trailMeshes.length) * 0.4;
+      }
+    }
 
     var controls = null;
     if (typeof THREE.OrbitControls === 'function') {
@@ -411,35 +484,42 @@
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.target.set(0, 0, 0);
-      controls.minDistance = 30;
+      controls.minDistance = 10;
       controls.maxDistance = 280;
       controls.maxPolarAngle = Math.PI / 2 - 0.04;
     } else {
       console.error('OrbitControls failed to load');
     }
 
-    window.setCameraView = function (viewType) {
+    function placeCamera(viewType) {
       var isTop = viewType === 'top';
+      var origin = framedTarget.clone();
       if (isTop) {
-        camera.position.set(0, 200, 0.1);
+        camera.position.set(origin.x, origin.y + BASE_CAM_DISTANCE, origin.z + 0.15);
         if (controls) {
           controls.maxPolarAngle = Math.PI;
           controls.minPolarAngle = 0;
         }
       } else {
-        camera.position.set(0, 90, 120);
+        var offset = new THREE.Vector3(18, 24, 26);
+        offset.setLength(BASE_CAM_DISTANCE);
+        camera.position.copy(origin).add(offset);
         if (controls) {
           controls.maxPolarAngle = Math.PI / 2 - 0.04;
-          controls.minPolarAngle = 0;
+          controls.minPolarAngle = 0.08;
         }
       }
       camera.up.set(0, 1, 0);
-      camera.lookAt(0, 0, 0);
+      camera.lookAt(origin);
       if (controls) {
-        controls.target.set(0, 0, 0);
+        controls.target.copy(origin);
         controls.update();
       }
       camera.updateProjectionMatrix();
+    }
+
+    window.setCameraView = function (viewType) {
+      placeCamera(viewType);
       if (window._currentZoomLevel) {
         window.setZoomLevel(window._currentZoomLevel);
       }
@@ -449,8 +529,8 @@
       var n = Number(level);
       if (!isFinite(n) || n <= 0) n = 1;
       window._currentZoomLevel = n;
-      var targetDistance = 150 / n;
-      var origin = controls ? controls.target.clone() : new THREE.Vector3(0, 0, 0);
+      var targetDistance = BASE_CAM_DISTANCE / n;
+      var origin = controls ? controls.target.clone() : framedTarget.clone();
       var dir = camera.position.clone().sub(origin);
       if (dir.lengthSq() < 1e-8) dir.set(0, 1, 0.001);
       dir.normalize().multiplyScalar(targetDistance);
@@ -458,6 +538,8 @@
       camera.lookAt(origin);
       if (controls) controls.update();
     };
+
+    placeCamera('3d');
     if (window._pendingCameraView) {
       window.setCameraView(window._pendingCameraView);
     }
@@ -515,12 +597,13 @@
         var child = group.children[0];
         child.traverse(function (node) {
           if (node.geometry) node.geometry.dispose();
-          if (node.material) {
-            if (node.material.length) {
-              for (var m = 0; m < node.material.length; m++) node.material[m].dispose();
-            } else {
-              node.material.dispose();
-            }
+          var mats = node.material;
+          if (!mats) return;
+          if (!mats.length) mats = [mats];
+          for (var m = 0; m < mats.length; m++) {
+            var mat = mats[m];
+            if (mat.map) mat.map.dispose();
+            mat.dispose();
           }
         });
         group.remove(child);
@@ -531,51 +614,119 @@
       return !!(v && isFinite(v.x) && isFinite(v.y) && isFinite(v.z));
     }
 
-    function faceHoop(group) {
-      if (!group) return;
-      var target = hoopFocus.clone();
-      target.y = group.position.y + 3.4;
-      if (Math.abs(group.position.x - target.x) < 0.05 && Math.abs(group.position.z - target.z) < 0.05) {
+    var passerId = null;
+    var shooterId = null;
+    var receiverId = null;
+    var passTargetId = null;
+    var shotOrigin = null;
+    var shotHoop = null;
+    var shotArc = 10;
+
+    function facePoint(group, point) {
+      if (!group || !point) return;
+      var target = new THREE.Vector3(point.x, group.position.y + 3.6, point.z);
+      if (Math.abs(group.position.x - target.x) < 0.04 && Math.abs(group.position.z - target.z) < 0.04) {
         return;
       }
       group.lookAt(target);
     }
 
+    function faceHoop(group) {
+      if (!group) return;
+      facePoint(group, hoopForShot(group.position));
+    }
+
+    function cssHex(hex) {
+      return '#' + new THREE.Color(hex).getHexString();
+    }
+
+    function shadeColor(hex, factor) {
+      var color = new THREE.Color(hex);
+      color.multiplyScalar(factor);
+      return color;
+    }
+
     function makeNumberTexture(playerNumber) {
       var canvas = document.createElement('canvas');
-      canvas.width = 128;
-      canvas.height = 128;
+      canvas.width = 256;
+      canvas.height = 256;
       var ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, 128, 128);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 88px sans-serif';
+      ctx.clearRect(0, 0, 256, 256);
+      ctx.font = 'bold 188px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(String(playerNumber), 64, 70);
+      ctx.lineWidth = 16;
+      ctx.strokeStyle = 'rgba(20, 16, 12, 0.55)';
+      ctx.strokeText(String(playerNumber), 128, 140);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(String(playerNumber), 128, 140);
       var texture = new THREE.CanvasTexture(canvas);
       texture.needsUpdate = true;
       return texture;
     }
 
-    function createTacticalDummy(teamColor, playerNumber) {
+    function makeBadgeTexture(playerNumber, teamColor) {
+      var canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      var ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, 256, 256);
+      ctx.fillStyle = cssHex(teamColor);
+      ctx.beginPath();
+      ctx.arc(128, 128, 112, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 16;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 148px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(playerNumber), 128, 142);
+      var texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
+    }
+
+    function createAthlete(teamColor, playerNumber) {
       var group = new THREE.Group();
-      var bodyMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.45,
-        metalness: 0.04,
+      var skinMat = new THREE.MeshStandardMaterial({
+        color: 0xF6F3EE,
+        roughness: 0.82,
+        metalness: 0,
       });
       var jerseyMat = new THREE.MeshStandardMaterial({
         color: teamColor,
-        roughness: 0.4,
-        metalness: 0.08,
+        roughness: 0.93,
+        metalness: 0,
       });
-      var ringMat = new THREE.MeshStandardMaterial({
-        color: teamColor,
-        roughness: 0.5,
-        metalness: 0.12,
+      var shortsMat = new THREE.MeshStandardMaterial({
+        color: shadeColor(teamColor, 0.86),
+        roughness: 0.94,
+        metalness: 0,
+      });
+      var trimMat = new THREE.MeshStandardMaterial({
+        color: 0xF7F7F7,
+        roughness: 0.7,
+        metalness: 0,
+      });
+      var shoeMat = new THREE.MeshStandardMaterial({
+        color: 0xF4F4F4,
+        roughness: 0.58,
+        metalness: 0.02,
+      });
+      var soleMat = new THREE.MeshStandardMaterial({
+        color: 0x242424,
+        roughness: 0.7,
+        metalness: 0,
+      });
+      var eyeMat = new THREE.MeshStandardMaterial({
+        color: 0x2A241F,
+        roughness: 0.45,
+        metalness: 0,
       });
 
-      function addMesh(parent, geometry, material, x, y, z) {
+      function add(parent, geometry, material, x, y, z) {
         var mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(x, y, z);
         mesh.castShadow = true;
@@ -584,100 +735,256 @@
         return mesh;
       }
 
-      function makeLimb(name, x, y, radiusTop, radiusBottom, length) {
-        var limb = new THREE.Group();
-        limb.name = name;
-        limb.position.set(x, y, 0);
-        addMesh(
-          limb,
-          new THREE.CylinderGeometry(radiusTop, radiusBottom, length, 10),
-          bodyMat,
-          0,
-          -length * 0.5,
-          0
-        );
-        group.add(limb);
-        return limb;
+      function makeLeg(side) {
+        var hip = new THREE.Group();
+        hip.name = side < 0 ? 'legL' : 'legR';
+        hip.position.set(side * 0.34, 3.18, 0);
+        add(hip, new THREE.CylinderGeometry(0.19, 0.16, 1.48, 12), skinMat, 0, -0.74, 0);
+        var knee = new THREE.Group();
+        knee.name = side < 0 ? 'kneeL' : 'kneeR';
+        knee.position.set(0, -1.48, 0);
+        add(knee, new THREE.CylinderGeometry(0.15, 0.12, 1.42, 12), skinMat, 0, -0.71, 0);
+        add(knee, new THREE.BoxGeometry(0.34, 0.16, 0.62), shoeMat, 0, -1.48, 0.08);
+        add(knee, new THREE.BoxGeometry(0.36, 0.06, 0.66), soleMat, 0, -1.58, 0.08);
+        hip.add(knee);
+        group.add(hip);
       }
+      makeLeg(-1);
+      makeLeg(1);
 
-      var ring = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.06, 10, 28), ringMat);
+      add(group, new THREE.CylinderGeometry(0.52, 0.62, 1.05, 16), shortsMat, 0, 2.82, 0);
+      add(group, new THREE.CylinderGeometry(0.63, 0.64, 0.08, 16), trimMat, 0, 2.32, 0);
+
+      var torso = add(group, new THREE.CylinderGeometry(0.52, 0.58, 1.62, 16), jerseyMat, 0, 4.08, 0);
+      torso.scale.z = 0.76;
+      var yoke = add(group, new THREE.CylinderGeometry(0.18, 0.18, 1.45, 12), jerseyMat, 0, 4.78, 0);
+      yoke.rotation.z = Math.PI / 2;
+      add(group, new THREE.SphereGeometry(0.3, 14, 12), jerseyMat, -0.66, 4.74, 0);
+      add(group, new THREE.SphereGeometry(0.3, 14, 12), jerseyMat, 0.66, 4.74, 0);
+      var hem = add(group, new THREE.CylinderGeometry(0.6, 0.6, 0.08, 16), trimMat, 0, 3.28, 0);
+      hem.scale.z = 0.76;
+      add(group, new THREE.CylinderGeometry(0.2, 0.24, 0.12, 12), trimMat, 0, 4.92, 0);
+
+      var numberMat = new THREE.MeshBasicMaterial({
+        map: makeNumberTexture(playerNumber),
+        transparent: true,
+        depthWrite: false,
+      });
+      var numberBackMat = numberMat.clone();
+      numberBackMat.map = makeNumberTexture(playerNumber);
+      var chest = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 1.12), numberMat);
+      chest.position.set(0, 4.12, 0.52);
+      group.add(chest);
+      var back = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 1.12), numberBackMat);
+      back.position.set(0, 4.12, -0.52);
+      back.rotation.y = Math.PI;
+      group.add(back);
+
+      add(group, new THREE.CylinderGeometry(0.16, 0.18, 0.28, 12), skinMat, 0, 5.18, 0);
+      add(group, new THREE.SphereGeometry(0.42, 20, 16), skinMat, 0, 5.68, 0);
+      add(group, new THREE.SphereGeometry(0.05, 10, 8), eyeMat, -0.13, 5.74, 0.48);
+      add(group, new THREE.SphereGeometry(0.05, 10, 8), eyeMat, 0.13, 5.74, 0.48);
+
+      function makeArm(side) {
+        var arm = new THREE.Group();
+        arm.name = side < 0 ? 'armL' : 'armR';
+        arm.position.set(side * 0.78, 4.7, 0);
+        add(arm, new THREE.CylinderGeometry(0.13, 0.12, 1.18, 12), skinMat, 0, -0.59, 0);
+        var elbow = new THREE.Group();
+        elbow.name = side < 0 ? 'elbowL' : 'elbowR';
+        elbow.position.set(0, -1.18, 0);
+        add(elbow, new THREE.CylinderGeometry(0.11, 0.1, 1.08, 12), skinMat, 0, -0.54, 0);
+        var hand = new THREE.Group();
+        hand.name = side < 0 ? 'handL' : 'handR';
+        hand.position.set(0, -1.12, 0);
+        add(hand, new THREE.SphereGeometry(0.13, 12, 10), skinMat, 0, 0, 0);
+        var hold = new THREE.Object3D();
+        hold.name = side < 0 ? 'holdL' : 'holdR';
+        hold.position.set(0, -0.16, 0);
+        hand.add(hold);
+        elbow.add(hand);
+        arm.add(elbow);
+        group.add(arm);
+      }
+      makeArm(-1);
+      makeArm(1);
+
+      var chestHold = new THREE.Object3D();
+      chestHold.name = 'chestHold';
+      chestHold.position.set(0.15, 4.55, 1.05);
+      group.add(chestHold);
+
+      var badge = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeBadgeTexture(playerNumber, teamColor),
+        depthTest: true,
+      }));
+      badge.name = 'badge';
+      badge.position.set(0, 6.95, 0);
+      badge.scale.set(1.45, 1.45, 1);
+      group.add(badge);
+
+      var ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.78, 0.045, 8, 28),
+        new THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.55, metalness: 0.04 })
+      );
+      ring.name = 'floorRing';
       ring.rotation.x = Math.PI / 2;
-      ring.position.y = 0.05;
+      ring.position.y = 0.045;
       ring.receiveShadow = true;
       group.add(ring);
 
-      makeLimb('legL', -0.24, 1.2, 0.16, 0.18, 1.2);
-      makeLimb('legR', 0.24, 1.2, 0.16, 0.18, 1.2);
-      addMesh(group, new THREE.CylinderGeometry(0.46, 0.5, 1.65, 16), jerseyMat, 0, 2.45, 0);
-
-      var numberPlane = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.62, 0.72),
-        new THREE.MeshBasicMaterial({
-          map: makeNumberTexture(playerNumber),
-          transparent: true,
-          depthWrite: false,
-        })
-      );
-      numberPlane.position.set(0, 2.5, -0.52);
-      numberPlane.rotation.y = Math.PI;
-      group.add(numberPlane);
-
-      var armL = makeLimb('armL', -0.58, 3.15, 0.12, 0.14, 1.35);
-      var armR = makeLimb('armR', 0.58, 3.15, 0.12, 0.14, 1.35);
-      addMesh(group, new THREE.SphereGeometry(0.38, 16, 12), bodyMat, 0, 3.72, 0.02);
-
-      var hold = new THREE.Object3D();
-      hold.name = 'ballHold';
-      hold.position.set(0.62, 3.2, 0.48);
-      group.add(hold);
-
-      var rightHand = new THREE.Object3D();
-      rightHand.name = 'rightHand';
-      rightHand.position.set(0, -1.35, 0.1);
-      armR.add(rightHand);
-      armL.userData.rest = { x: 0, y: 0, z: 0.08 };
-      armR.userData.rest = { x: 0, y: 0, z: -0.08 };
+      group.updateMatrixWorld(true);
+      var minY = Infinity;
+      group.traverse(function (node) {
+        if (!node.isMesh || node.name === 'floorRing') return;
+        var box = new THREE.Box3().setFromObject(node);
+        if (box.min.y < minY) minY = box.min.y;
+      });
+      if (isFinite(minY)) {
+        for (var i = 0; i < group.children.length; i++) {
+          if (group.children[i].name === 'floorRing') continue;
+          group.children[i].position.y -= minY;
+        }
+      }
+      ring.position.y = 0.045;
       return group;
     }
 
-    function applyDummyMotion(actor) {
-      if (!actor || !actor.mesh) return;
-      var armL = actor.mesh.getObjectByName('armL');
-      var armR = actor.mesh.getObjectByName('armR');
-      var legL = actor.mesh.getObjectByName('legL');
-      var legR = actor.mesh.getObjectByName('legR');
+    function worldOf(actor, nodeName) {
+      var point = new THREE.Vector3();
+      if (!actor || !actor.mesh) return point;
+      actor.mesh.updateMatrixWorld(true);
+      var node = actor.mesh.getObjectByName(nodeName);
+      if (node) {
+        node.getWorldPosition(point);
+        if (isFiniteVec(point)) return point;
+      }
+      point.set(actor.mesh.position.x, 4.3, actor.mesh.position.z);
+      return point;
+    }
+
+    function handsMid(actor) {
+      return worldOf(actor, 'handR').add(worldOf(actor, 'handL')).multiplyScalar(0.5);
+    }
+
+    function smoothstep(t) {
+      var x = Math.max(0, Math.min(1, t));
+      return x * x * (3 - 2 * x);
+    }
+
+    function phaseAt(t) {
+      var hasPass = !!(passPath && passPath.length > 1);
+      var hasShoot = shooterId != null && !!shootPath;
+      var passEnd = hasPass ? (hasShoot ? 0.4 : 1) : 0;
+      var gatherEnd = hasShoot ? (hasPass ? 0.56 : 0.22) : 1;
+      if (hasPass && t < passEnd) {
+        return { name: 'pass', u: t / Math.max(passEnd, 0.001), passEnd: passEnd, gatherEnd: gatherEnd };
+      }
+      if (hasShoot && t < gatherEnd) {
+        return {
+          name: 'gather',
+          u: (t - passEnd) / Math.max(gatherEnd - passEnd, 0.001),
+          passEnd: passEnd,
+          gatherEnd: gatherEnd,
+        };
+      }
+      if (hasShoot) {
+        return {
+          name: 'shoot',
+          u: (t - gatherEnd) / Math.max(1 - gatherEnd, 0.001),
+          passEnd: passEnd,
+          gatherEnd: gatherEnd,
+        };
+      }
+      return { name: 'hold', u: t, passEnd: passEnd, gatherEnd: gatherEnd };
+    }
+
+    function applyPose(actor, pose, amount) {
+      var mesh = actor.mesh;
+      var armL = mesh.getObjectByName('armL');
+      var armR = mesh.getObjectByName('armR');
+      var elbowL = mesh.getObjectByName('elbowL');
+      var elbowR = mesh.getObjectByName('elbowR');
+      var legL = mesh.getObjectByName('legL');
+      var legR = mesh.getObjectByName('legR');
+      var kneeL = mesh.getObjectByName('kneeL');
+      var kneeR = mesh.getObjectByName('kneeR');
       if (!armL || !armR || !legL || !legR) return;
+      var lift = amount == null ? 1 : Math.max(0, Math.min(1, amount));
+      function setRot(obj, x, y, z) {
+        if (obj) obj.rotation.set(x, y, z);
+      }
+      setRot(armL, 0, 0, 0);
+      setRot(armR, 0, 0, 0);
+      setRot(elbowL, 0, 0, 0);
+      setRot(elbowR, 0, 0, 0);
+      setRot(legL, 0, 0, 0);
+      setRot(legR, 0, 0, 0);
+      setRot(kneeL, 0, 0, 0);
+      setRot(kneeR, 0, 0, 0);
+      mesh.position.y = 0;
 
-      var moving =
-        actor.actionType !== 'shoot' &&
-        actor.path &&
-        actor.path.length > 1 &&
-        progress > 0 &&
-        progress < 1;
+      var moving = actor.path && actor.path.length > 1 && progress > 0.02 && progress < 0.98;
+      var swing = Math.sin(Date.now() * 0.009) * 0.7;
 
-      if (moving) {
-        var swing = Math.sin(Date.now() * 0.01) * 0.7;
-        armL.rotation.set(swing, 0, 0.08);
-        armR.rotation.set(-swing, 0, -0.08);
-        legL.rotation.set(-swing, 0, 0);
-        legR.rotation.set(swing, 0, 0);
+      if (pose === 'shoot') {
+        setRot(armL, -2.25 * lift, 0, -0.28 * lift);
+        setRot(armR, -2.45 * lift, 0, 0.22 * lift);
+        setRot(elbowL, -0.35 * lift, 0, 0);
+        setRot(elbowR, -0.28 * lift, 0, 0);
+        setRot(legL, -0.12 * lift, 0, 0);
+        setRot(legR, -0.2 * lift, 0, 0);
+        setRot(kneeL, 0.28 * lift, 0, 0);
+        setRot(kneeR, 0.4 * lift, 0, 0);
         return;
       }
-
-      legL.rotation.set(0, 0, 0);
-      legR.rotation.set(0, 0, 0);
-      if (actor.actionType === 'shoot') {
-        armL.rotation.set(-2.35, 0.12, 0.28);
-        armR.rotation.set(-2.5, -0.08, -0.18);
+      if (pose === 'pass') {
+        setRot(armR, -1.45 * lift, 0, 0.1 * lift);
+        setRot(elbowR, -0.25 * lift, 0, 0);
+        setRot(armL, -0.7 * lift, 0, -0.16 * lift);
+        setRot(elbowL, -0.45 * lift, 0, 0);
+        if (moving) {
+          setRot(legL, -swing * 0.35, 0, 0);
+          setRot(legR, swing * 0.35, 0, 0);
+        }
         return;
       }
-      if (actor.actionType === 'screen') {
-        armL.rotation.set(-0.25, 0.2, 1.25);
-        armR.rotation.set(-0.25, -0.2, -1.25);
+      if (pose === 'catch') {
+        setRot(armL, -1.15 * lift, 0, -0.34 * lift);
+        setRot(armR, -1.15 * lift, 0, 0.34 * lift);
+        setRot(elbowL, -0.85 * lift, 0, 0);
+        setRot(elbowR, -0.85 * lift, 0, 0);
+        if (moving) {
+          setRot(legL, -swing * 0.35, 0, 0);
+          setRot(legR, swing * 0.35, 0, 0);
+        }
         return;
       }
-      armL.rotation.set(0, 0, 0.08);
-      armR.rotation.set(0, 0, -0.08);
+      if (pose === 'screen') {
+        setRot(armL, -0.35, 0, -1.25);
+        setRot(armR, -0.35, 0, 1.25);
+        setRot(elbowL, -0.2, 0, 0);
+        setRot(elbowR, -0.2, 0, 0);
+        setRot(legL, -0.28, 0, -0.14);
+        setRot(legR, -0.28, 0, 0.14);
+        setRot(kneeL, 0.5, 0, 0);
+        setRot(kneeR, 0.5, 0, 0);
+        return;
+      }
+      if (pose === 'run' || moving) {
+        setRot(armL, swing, 0, -0.18);
+        setRot(armR, -swing, 0, 0.18);
+        setRot(elbowL, -0.5, 0, 0);
+        setRot(elbowR, -0.5, 0, 0);
+        setRot(legL, -swing, 0, 0);
+        setRot(legR, swing, 0, 0);
+        mesh.position.y = Math.abs(Math.sin(Date.now() * 0.009)) * 0.12;
+        return;
+      }
+      setRot(armL, -0.28, 0, -0.2);
+      setRot(armR, -0.28, 0, 0.2);
+      setRot(elbowL, -0.55, 0, 0);
+      setRot(elbowR, -0.55, 0, 0);
     }
 
     function faceScreenLine(actor) {
@@ -694,17 +1001,45 @@
       }
       dir.normalize();
       var target = actor.mesh.position.clone().add(dir);
-      target.y = actor.mesh.position.y + 3.4;
-      actor.mesh.lookAt(target);
+      facePoint(actor.mesh, target);
     }
 
-    function applyFacing(actor) {
+    function faceActor(actor, phase) {
       if (!actor || !actor.mesh) return;
       if (actor.actionType === 'screen') {
         faceScreenLine(actor);
-      } else {
-        faceHoop(actor.mesh);
+        return;
       }
+      if (actor.id === passerId && phase.name === 'pass') {
+        var recv = actorsById[receiverId];
+        if (recv) {
+          facePoint(actor.mesh, recv.mesh.position);
+          return;
+        }
+        if (passPath && passPath.length) {
+          facePoint(actor.mesh, passPath[passPath.length - 1]);
+          return;
+        }
+      }
+      if (actor.id === shooterId && (phase.name === 'gather' || phase.name === 'shoot')) {
+        facePoint(actor.mesh, hoopForShot(actor.mesh.position));
+        return;
+      }
+      faceHoop(actor.mesh);
+    }
+
+    function choosePose(actor, phase) {
+      if (actor.actionType === 'screen') return 'screen';
+      if (shooterId != null && actor.id === shooterId && (phase.name === 'gather' || phase.name === 'shoot')) {
+        return 'shoot';
+      }
+      if (passerId != null && actor.id === passerId && phase.name === 'pass') return 'pass';
+      if (receiverId != null && actor.id === receiverId && phase.name === 'pass' && phase.u > 0.3) return 'catch';
+      if (receiverId != null && actor.id === receiverId && phase.name === 'gather' && actor.id !== shooterId) {
+        return 'catch';
+      }
+      if (actor.path && actor.path.length > 1 && progress > 0.02 && progress < 0.98) return 'run';
+      return 'idle';
     }
 
     function pathColor(actionType) {
@@ -732,21 +1067,17 @@
       if (!worldPath.length) return;
       var start = worldPath[0];
       if (!isFiniteVec(start)) return;
-      var color = isOffense ? 0xF26A21 : 0x2F6FE0;
+      var color = isOffense ? 0xE4570E : 0x1E5BC6;
       var jerseyNumber = playerId >= 11 ? playerId - 10 : playerId;
-      var mesh = createTacticalDummy(color, jerseyNumber);
+      var mesh = createAthlete(color, jerseyNumber);
       mesh.userData.team = isOffense ? 'offense' : 'defense';
       mesh.position.set(start.x, 0, start.z);
       faceHoop(mesh);
       playerGroup.add(mesh);
-      var hand =
-        mesh.getObjectByName('ballHold') ||
-        mesh.getObjectByName('rightHand');
       var actor = {
         id: playerId,
         mesh: mesh,
         path: worldPath,
-        hand: hand,
         actionType: 'run',
       };
       actors.push(actor);
@@ -762,6 +1093,9 @@
       var floorBall = null;
       var pass = null;
       var shoot = null;
+      var passer = null;
+      var shooter = null;
+      var passTarget = null;
       var routes = [];
       var actions = (raw && raw.actions) || [];
       for (var i = 0; i < actions.length; i++) {
@@ -791,13 +1125,21 @@
           if (!actionTypes[id]) actionTypes[id] = action.actionType || 'run';
         } else if (action.actionType === 'pass') {
           if (!pass || id === ballCarrier) pass = worldPath;
-          if (!actionTypes[id] || actionTypes[id] === 'run') {
+          passer = id;
+          if (action.targetPlayerId != null && action.targetPlayerId !== '') {
+            var targetId = Number(action.targetPlayerId);
+            if (targetId > 0) passTarget = targetId;
+          }
+          if (!starts[id]) starts[id] = worldPath[0];
+          if (!actionTypes[id] || actionTypes[id] === 'run' || actionTypes[id] === 'move') {
             actionTypes[id] = 'pass';
           }
           routes.push({ points: worldPath, actionType: 'pass' });
         } else if (action.actionType === 'shoot') {
           shoot = worldPath;
+          shooter = id;
           actionTypes[id] = 'shoot';
+          if (!starts[id]) starts[id] = worldPath[0];
           routes.push({ points: worldPath, actionType: 'shoot' });
         } else {
           moves[id] = worldPath;
@@ -815,8 +1157,40 @@
         floorBall: floorBall,
         pass: pass,
         shoot: shoot,
+        passerId: passer,
+        shooterId: shooter,
+        passTargetId: passTarget,
         routes: routes,
       };
+    }
+
+    function resolveReceiver() {
+      if (passTargetId && actorsById[passTargetId] && passTargetId !== passerId) return passTargetId;
+      if (!passPath || !passPath.length) {
+        return shooterId != null && shooterId !== passerId ? shooterId : null;
+      }
+      var end = passPath[passPath.length - 1];
+      var best = null;
+      var bestD = 16;
+      for (var i = 0; i < actors.length; i++) {
+        var actor = actors[i];
+        if (actor.id === passerId) continue;
+        if (actor.id < 1 || actor.id > 5) continue;
+        var points = [actor.mesh.position];
+        if (actor.path && actor.path.length) {
+          points.push(actor.path[0]);
+          points.push(actor.path[actor.path.length - 1]);
+        }
+        for (var p = 0; p < points.length; p++) {
+          var dist = Math.hypot(points[p].x - end.x, points[p].z - end.z);
+          if (dist < bestD) {
+            bestD = dist;
+            best = actor.id;
+          }
+        }
+      }
+      if (best == null && shooterId != null && shooterId !== passerId) return shooterId;
+      return best;
     }
 
     function applyCurrentStep() {
@@ -826,7 +1200,12 @@
       standaloneBall = step.floorBall;
       passPath = step.pass;
       shootPath = step.shoot;
-      shootStart = null;
+      passerId = step.passerId;
+      shooterId = step.shooterId;
+      passTargetId = step.passTargetId;
+      shotOrigin = null;
+      shotHoop = null;
+      trailHistory = [];
       disposeGroup(pathLineGroup);
       for (var r = 0; r < step.routes.length; r++) {
         addPathLine(step.routes[r].points, step.routes[r].actionType);
@@ -849,45 +1228,45 @@
         if (origin && isFiniteVec(origin)) {
           actor.mesh.position.set(origin.x, 0, origin.z);
         }
-        applyFacing(actor);
-        applyDummyMotion(actor);
       }
-      if (shootPath) {
-        var shooter = null;
+      if (shooterId == null) {
         for (var s = 0; s < actors.length; s++) {
-          if (actors[s].actionType === 'shoot') {
-            shooter = actors[s];
-            break;
-          }
+          if (actors[s].actionType === 'shoot') shooterId = actors[s].id;
         }
-        if (!shooter && ballCarrierId != null) shooter = actorsById[ballCarrierId];
-        if (shooter && shooter.mesh) {
-          shooter.mesh.updateMatrixWorld(true);
-          var holdNode =
-            shooter.hand ||
-            shooter.mesh.getObjectByName('ballHold') ||
-            shooter.mesh;
-          var startWp = new THREE.Vector3();
-          holdNode.getWorldPosition(startWp);
-          if (isFiniteVec(startWp) && startWp.y > 1.5) {
-            shootStart = startWp.clone();
-          } else {
-            shootStart = new THREE.Vector3(
-              shooter.mesh.position.x,
-              3.6,
-              shooter.mesh.position.z
-            );
-          }
-        } else if (shootPath[0]) {
-          shootStart = new THREE.Vector3(shootPath[0].x, 3.6, shootPath[0].z);
+      }
+      if (passerId == null) {
+        for (var p = 0; p < actors.length; p++) {
+          if (actors[p].actionType === 'pass') passerId = actors[p].id;
         }
+      }
+      receiverId = resolveReceiver();
+      var phase = phaseAt(0);
+      for (var n = 0; n < actors.length; n++) {
+        faceActor(actors[n], phase);
+        applyPose(actors[n], choosePose(actors[n], phase), 1);
       }
       console.log(
         '3D step', currentStepIndex + 1, '/', playbookSteps.length,
         'ballCarrierId:', ballCarrierId,
-        'pass:', !!passPath,
-        'shoot:', !!shootPath
+        'passer:', passerId,
+        'receiver:', receiverId,
+        'shooter:', shooterId
       );
+    }
+
+    function framePlayers() {
+      if (!actors.length) return;
+      var cx = 0;
+      var cz = 0;
+      for (var i = 0; i < actors.length; i++) {
+        cx += actors[i].mesh.position.x;
+        cz += actors[i].mesh.position.z;
+      }
+      cx /= actors.length;
+      cz /= actors.length;
+      var hoop = hoopForShot(new THREE.Vector3(cx, 0, cz));
+      framedTarget.set(cx * 0.62 + hoop.x * 0.38, 3.2, cz * 0.62 + hoop.z * 0.38);
+      window.setCameraView(window._pendingCameraView || '3d');
     }
 
     function applyPlaybook(jsonString) {
@@ -909,6 +1288,12 @@
       passPath = null;
       shootPath = null;
       shootStart = null;
+      passerId = null;
+      shooterId = null;
+      receiverId = null;
+      passTargetId = null;
+      shotOrigin = null;
+      shotHoop = null;
       standaloneBall = null;
       progress = 0;
       currentStepIndex = 0;
@@ -925,29 +1310,106 @@
         playbookSteps.push(parseStep(rawSteps[s]));
       }
 
-      function spawnPlayers() {
-        disposeGroup(playerGroup);
-        actors = [];
-        actorsById = {};
-        var spawned = {};
-        for (var p = 0; p < playbookSteps.length; p++) {
-          var starts = playbookSteps[p].starts;
-          var ids = Object.keys(starts);
-          for (var n = 0; n < ids.length; n++) {
-            var pid = Number(ids[n]);
-            if (spawned[pid]) continue;
-            spawned[pid] = true;
-            addPlayer(pid, [starts[pid]], pid >= 1 && pid <= 5);
-          }
+      disposeGroup(playerGroup);
+      actors = [];
+      actorsById = {};
+      var spawned = {};
+      for (var p = 0; p < playbookSteps.length; p++) {
+        var starts = playbookSteps[p].starts;
+        var ids = Object.keys(starts);
+        for (var n = 0; n < ids.length; n++) {
+          var pid = Number(ids[n]);
+          if (spawned[pid]) continue;
+          spawned[pid] = true;
+          addPlayer(pid, [starts[pid]], pid >= 1 && pid <= 5);
         }
-        applyCurrentStep();
-        console.log(
-          'Loaded steps:', playbookSteps.length,
-          'players:', actors.length
-        );
       }
+      applyCurrentStep();
+      framePlayers();
+      console.log('Loaded steps:', playbookSteps.length, 'players:', actors.length);
+    }
 
-      spawnPlayers();
+    function updateBall(delta, phase) {
+      var ballPos = new THREE.Vector3(0, 1.2, 0);
+      var flying = false;
+      if (phase.name === 'shoot' && shooterId != null && actorsById[shooterId]) {
+        var shooter = actorsById[shooterId];
+        if (!shotOrigin) {
+          shotOrigin = handsMid(shooter);
+          if (!isFiniteVec(shotOrigin) || shotOrigin.y < 3.2) {
+            shotOrigin = worldOf(shooter, 'chestHold');
+            shotOrigin.y = Math.max(shotOrigin.y, 6.2);
+          }
+          shotHoop = hoopForShot(shotOrigin).clone();
+          var dist = Math.hypot(shotHoop.x - shotOrigin.x, shotHoop.z - shotOrigin.z);
+          shotArc = Math.max(6.5, Math.min(15, 4.2 + dist * 0.34));
+        }
+        var flight = Math.min(1, phase.u / 0.9);
+        var rimPoint = new THREE.Vector3(shotHoop.x, RIM_HEIGHT, shotHoop.z);
+        ballPos.copy(shotOrigin).lerp(rimPoint, flight);
+        if (flight < 1) {
+          ballPos.y += Math.sin(flight * Math.PI) * shotArc;
+        } else {
+          var sink = Math.min(1, (phase.u - 0.9) / 0.1);
+          ballPos.set(shotHoop.x, RIM_HEIGHT - sink * 1.15, shotHoop.z);
+        }
+        flying = true;
+      } else if (phase.name === 'pass' && passPath && passPath.length > 1) {
+        shotOrigin = null;
+        var passer = actorsById[passerId];
+        var from;
+        if (passer) {
+          var chest = worldOf(passer, 'chestHold');
+          var hand = worldOf(passer, 'handR');
+          from = chest.lerp(hand, Math.min(1, phase.u / 0.35));
+        } else {
+          from = new THREE.Vector3(passPath[0].x, 4.4, passPath[0].z);
+        }
+        var recv = actorsById[receiverId];
+        var to;
+        if (recv) {
+          to = worldOf(recv, 'chestHold');
+        } else {
+          var end = passPath[passPath.length - 1];
+          to = new THREE.Vector3(end.x, 4.4, end.z);
+        }
+        ballPos.copy(from).lerp(to, smoothstep(phase.u));
+        ballPos.y += Math.sin(phase.u * Math.PI) * 2.8;
+        flying = true;
+      } else if (phase.name === 'gather' && shooterId != null && actorsById[shooterId]) {
+        shotOrigin = null;
+        var gatherShooter = actorsById[shooterId];
+        var gatherFrom = worldOf(gatherShooter, 'chestHold');
+        var gatherTo = handsMid(gatherShooter);
+        ballPos.copy(gatherFrom.lerp(gatherTo, Math.min(1, phase.u)));
+      } else if (ballCarrierId != null && actorsById[ballCarrierId]) {
+        shotOrigin = null;
+        var holder = actorsById[ballCarrierId];
+        var dribbling = holder.path && holder.path.length > 1 && progress > 0.02 && progress < 0.98;
+        if (dribbling) {
+          var side = new THREE.Vector3(0.72, 0, 0.55);
+          side.applyQuaternion(holder.mesh.quaternion);
+          var bounce = Math.abs(Math.sin(Date.now() * 0.012));
+          ballPos.set(
+            holder.mesh.position.x + side.x,
+            0.55 + bounce * 1.85,
+            holder.mesh.position.z + side.z
+          );
+        } else {
+          ballPos.copy(worldOf(holder, 'chestHold'));
+        }
+      } else if (standaloneBall && isFiniteVec(standaloneBall)) {
+        shotOrigin = null;
+        ballPos.set(standaloneBall.x, 0.55, standaloneBall.z);
+      }
+      if (!isFiniteVec(ballPos)) ballPos.set(0, 1.2, 0);
+      ballMesh.position.copy(ballPos);
+      ballMesh.visible = true;
+      if (flying) {
+        ballMesh.rotation.x += delta * 7;
+        ballMesh.rotation.y += delta * 4.2;
+      }
+      pushTrail(ballPos, flying);
     }
 
     window.addEventListener('resize', function () {
@@ -958,6 +1420,7 @@
 
     function animate() {
       requestAnimationFrame(animate);
+      window.__frames = (window.__frames || 0) + 1;
       var delta = clock.getDelta();
       if (isPlaying3D && playbookSteps.length) {
         progress += delta / duration;
@@ -973,69 +1436,24 @@
         }
       }
 
+      var phase = phaseAt(Math.max(0, Math.min(1, progress)));
       for (var i = 0; i < actors.length; i++) {
         var actor = actors[i];
         if (actor.path && actor.path.length > 1) {
-          var t = progress;
-          if (actor.actionType === 'screen' && t >= 1) t = 1;
-          var pos = getPositionAlongPath(actor.path, t);
-          if (isFiniteVec(pos)) {
-            actor.mesh.position.set(pos.x, 0, pos.z);
-          }
+          var pos = getPositionAlongPath(actor.path, Math.max(0, Math.min(1, progress)));
+          if (isFiniteVec(pos)) actor.mesh.position.set(pos.x, 0, pos.z);
         }
-        applyFacing(actor);
-        applyDummyMotion(actor);
+        var pose = choosePose(actor, phase);
+        var amount = 1;
+        if (pose === 'shoot' && phase.name === 'gather') amount = 0.28 + 0.72 * phase.u;
+        if (pose === 'pass') amount = Math.min(1, 0.45 + phase.u);
+        if (pose === 'catch') amount = Math.max(0.2, Math.min(1, (phase.u - 0.2) / 0.45));
+        faceActor(actor, phase);
+        applyPose(actor, pose, amount);
       }
 
       ensureBall();
-      var ballPos = new THREE.Vector3(0, 1, 0);
-      if (shootPath) {
-        var origin = shootStart;
-        if (!origin || !isFiniteVec(origin)) {
-          origin = new THREE.Vector3(
-            shootPath[0] ? shootPath[0].x : 0,
-            3.6,
-            shootPath[0] ? shootPath[0].z : 0
-          );
-        }
-        var hoop = hoopForShot(origin);
-        var t = Math.max(0, Math.min(1, progress));
-        var arcHeight = 25;
-        ballPos.set(
-          origin.x + (hoop.x - origin.x) * t,
-          origin.y + (hoop.y - origin.y) * t + Math.sin(t * Math.PI) * arcHeight,
-          origin.z + (hoop.z - origin.z) * t
-        );
-      } else if (passPath && passPath.length > 1) {
-        var fly = getPositionAlongPath(passPath, progress);
-        if (isFiniteVec(fly)) {
-          ballPos.set(fly.x, 0.95 + Math.sin(progress * Math.PI) * 3.2, fly.z);
-        }
-      } else if (ballCarrierId != null && actorsById[ballCarrierId]) {
-        var holder = actorsById[ballCarrierId];
-        holder.mesh.updateMatrixWorld(true);
-        var hold =
-          holder.hand ||
-          holder.mesh.getObjectByName('ballHold') ||
-          holder.mesh;
-        holder.mesh.updateMatrixWorld(true);
-        var wp = new THREE.Vector3();
-        hold.getWorldPosition(wp);
-        if (isFiniteVec(wp) && wp.y > 1.5) {
-          ballPos.copy(wp);
-        } else {
-          ballPos.set(
-            holder.mesh.position.x + 0.7,
-            holder.mesh.position.y + 3.55,
-            holder.mesh.position.z + 0.55
-          );
-        }
-      } else if (standaloneBall && isFiniteVec(standaloneBall)) {
-        ballPos.set(standaloneBall.x, 1, standaloneBall.z);
-      }
-      if (!isFiniteVec(ballPos)) ballPos.set(0, 1, 0);
-      ballMesh.position.copy(ballPos);
-      ballMesh.visible = true;
+      updateBall(delta, phase);
 
       if (controls) controls.update();
       renderer.render(scene, camera);
@@ -1043,10 +1461,162 @@
     animate();
 
     window.loadPlaybook = applyPlaybook;
+    window.__debugState = function () {
+      var phase = phaseAt(Math.max(0, Math.min(1, progress)));
+      return {
+        steps: playbookSteps.length,
+        step: currentStepIndex,
+        progress: progress,
+        phase: phase.name,
+        phaseU: phase.u,
+        passerId: passerId,
+        shooterId: shooterId,
+        receiverId: receiverId,
+        shotArc: shotArc,
+        release: (function () {
+          var actor = shooterId != null ? actorsById[shooterId] : null;
+          if (!actor) actor = actors[0];
+          if (!actor) return null;
+          var hands = handsMid(actor);
+          var chest = worldOf(actor, 'chestHold');
+          var box = new THREE.Box3().setFromObject(actor.mesh);
+          return {
+            id: actor.id,
+            handY: Math.round(hands.y * 10) / 10,
+            handZ: Math.round(hands.z * 10) / 10,
+            chestY: Math.round(chest.y * 10) / 10,
+            chestZ: Math.round(chest.z * 10) / 10,
+            feetZ: Math.round(actor.mesh.position.z * 10) / 10,
+            height: Math.round((box.max.y - box.min.y) * 10) / 10,
+          };
+        })(),
+        ball: ballMesh ? [ballMesh.position.x, ballMesh.position.y, ballMesh.position.z] : null,
+        hoop: [HOOP_POSITION.x, HOOP_POSITION.y, HOOP_POSITION.z],
+        players: actors.map(function (actor) {
+          return {
+            id: actor.id,
+            action: actor.actionType,
+            x: Math.round(actor.mesh.position.x * 10) / 10,
+            y: Math.round(actor.mesh.position.y * 10) / 10,
+            z: Math.round(actor.mesh.position.z * 10) / 10,
+          };
+        }),
+      };
+    };
+    window.__focus = function (id) {
+      var actor = actorsById[id];
+      if (!actor || !actor.mesh) return;
+      var p = actor.mesh.position;
+      framedTarget.set(p.x, 3.6, p.z);
+      camera.position.set(p.x + 8, 5.2, p.z - 7);
+      camera.lookAt(p.x, 3.5, p.z);
+      if (controls) {
+        controls.target.set(p.x, 3.5, p.z);
+        controls.update();
+      }
+    };
+    window.__seek = function (step, t) {
+      if (!playbookSteps.length) return null;
+      currentStepIndex = Math.max(0, Math.min(playbookSteps.length - 1, Number(step) || 0));
+      progress = Math.max(0, Math.min(1, Number(t) || 0));
+      isPlaying3D = false;
+      shotOrigin = null;
+      shotHoop = null;
+      applyCurrentStep();
+      return window.__debugState();
+    };
+
+    function grokPoint(x, y) {
+      return [(x / 400) * 0.8 + 0.1, (y / 400) * 0.4 + 0.06];
+    }
+
+    function spainPreview() {
+      function step(carrier, players) {
+        var actions = [];
+        for (var i = 0; i < players.length; i++) {
+          var player = players[i];
+          var path = [];
+          for (var k = 0; k < player.path.length; k++) {
+            path.push(grokPoint(player.path[k][0], player.path[k][1]));
+          }
+          var actionType = player.actionType === 'move' ? 'run' : player.actionType;
+          if (path.length > 1) actions.push({ playerId: player.id, actionType: 'run', path: [path[0]] });
+          actions.push({ playerId: player.id, actionType: actionType, path: path });
+        }
+        var hold = [grokPoint(200, 320)];
+        for (var j = 0; j < players.length; j++) {
+          if (players[j].id === carrier) hold = [grokPoint(players[j].path[0][0], players[j].path[0][1])];
+        }
+        actions.push({ playerId: carrier, actionType: 'dribble', path: hold, targetPlayerId: carrier });
+        return { actions: actions };
+      }
+      return {
+        playName: 'Spain Pick & Roll',
+        steps: [
+          step(1, [
+            { id: 1, actionType: 'move', path: [[200, 320], [200, 300]] },
+            { id: 2, actionType: 'move', path: [[60, 280]] },
+            { id: 3, actionType: 'move', path: [[340, 280]] },
+            { id: 4, actionType: 'move', path: [[120, 120]] },
+            { id: 5, actionType: 'move', path: [[200, 160]] },
+          ]),
+          step(1, [
+            { id: 1, actionType: 'run', path: [[200, 300], [170, 240]] },
+            { id: 5, actionType: 'screen', path: [[200, 160], [175, 230]] },
+            { id: 4, actionType: 'run', path: [[120, 120], [190, 90]] },
+          ]),
+          step(1, [
+            { id: 1, actionType: 'pass', path: [[170, 240], [190, 90]] },
+            { id: 4, actionType: 'shoot', path: [[190, 90], [200, 40]] },
+            { id: 5, actionType: 'run', path: [[175, 230], [210, 100]] },
+          ]),
+        ],
+      };
+    }
+
+    function lineupPreview() {
+      var spots = [
+        [1, 0.34, 0.30],
+        [2, 0.50, 0.22],
+        [3, 0.66, 0.30],
+        [4, 0.42, 0.14],
+        [5, 0.58, 0.14],
+        [11, 0.30, 0.38],
+        [12, 0.44, 0.36],
+        [13, 0.58, 0.36],
+        [14, 0.50, 0.18],
+        [15, 0.68, 0.38],
+      ];
+      var actions = [];
+      for (var i = 0; i < spots.length; i++) {
+        actions.push({ playerId: spots[i][0], actionType: 'run', path: [[spots[i][1], spots[i][2]]] });
+      }
+      actions.push({ playerId: 1, actionType: 'dribble', path: [[0.34, 0.30]], targetPlayerId: 1 });
+      return { playName: 'Lineup', steps: [{ phaseId: 0, actions: actions }] };
+    }
+
+    function runPreviewFromQuery() {
+      var params;
+      try {
+        params = new URLSearchParams(window.location.search);
+      } catch (err) {
+        return;
+      }
+      var mode = params.get('preview');
+      if (!mode) return;
+      if (mode === 'spain') applyPlaybook(spainPreview());
+      else if (mode === 'lineup') applyPlaybook(lineupPreview());
+      else return;
+      window.__seek(params.get('step') || 0, params.get('t') || 0);
+      if (params.get('zoom')) window.setZoomLevel(params.get('zoom'));
+    }
+
     if (pendingPlaybookJson != null) {
       applyPlaybook(pendingPlaybookJson);
       pendingPlaybookJson = null;
     }
+    runPreviewFromQuery();
+    window.__ready = true;
 
     console.log('Three.js Scene Initialized Successfully');
   };
