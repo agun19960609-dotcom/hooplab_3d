@@ -62,6 +62,24 @@ void main() {
     expect(getPositionAlongPath(points, 0.75), const Offset(10, 5));
   });
 
+  test('playback eases in and out and a pass arrives before the jog', () {
+    expect(playbackEase(0), 0);
+    expect(playbackEase(1), 1);
+    expect(playbackEase(0.5), 0.5);
+    expect(playbackEase(0.25), lessThan(0.25));
+    expect(playbackEase(0.75), greaterThan(0.75));
+    expect(passFlight(0), 0);
+    expect(passFlight(0.55), 1);
+    expect(passFlight(1), 1);
+    expect(passFlight(0.2), greaterThan(playbackEase(0.2)));
+    const points = [Offset(0, 0), Offset(10, 0)];
+    final eased = getPositionAlongPath(points, playbackEase(0.25));
+    expect(eased.dx, greaterThan(0));
+    expect(eased.dx, lessThan(2.5));
+    final pass = getPositionAlongPath(points, passFlight(0.55));
+    expect(pass.dx, 10);
+  });
+
   testWidgets('dashboard is the home tab', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 

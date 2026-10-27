@@ -310,6 +310,20 @@ Offset getPositionAlongPath(List<Offset> points, double progress) {
   return points.last;
 }
 
+/// Ease-in/out for playback time. [getPositionAlongPath] stays linear.
+double playbackEase(double t) {
+  final x = t.clamp(0.0, 1.0);
+  return x * x * x * (x * (x * 6 - 15) + 10);
+}
+
+/// A pass reaches the catch before the step ends. Shoot flights use [playbackEase].
+double passFlight(double t) {
+  const passEnd = 0.55;
+  final u = (t / passEnd).clamp(0.0, 1.0);
+  final inv = 1.0 - u;
+  return 1.0 - inv * inv * inv;
+}
+
 class PlayboardView extends StatefulWidget {
   const PlayboardView({super.key, this.initialPlayData});
 
@@ -1867,15 +1881,16 @@ class CourtPainter extends CustomPainter {
       LineType.screen => _screenColor,
       LineType.shoot => _shootColor,
     };
+    final dashed = line.type == LineType.pass || line.type == LineType.shoot;
     final paint = Paint()
-      ..color = color
+      ..color = color.withValues(alpha: dashed ? 0.48 : 0.72)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0
+      ..strokeWidth = dashed ? 1.5 : 2.0
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..isAntiAlias = true;
 
-    if (line.type == LineType.pass || line.type == LineType.shoot) {
+    if (dashed) {
       _drawDashedPolyline(canvas, points, paint);
     } else {
       final path = Path()..moveTo(points.first.dx, points.first.dy);
@@ -1890,7 +1905,7 @@ class CourtPainter extends CustomPainter {
     if (line.type == LineType.screen) {
       _drawScreenTee(canvas, tip.$1, tip.$2, paint);
     } else {
-      _drawArrowhead(canvas, tip.$1, tip.$2, color);
+      _drawArrowhead(canvas, tip.$1, tip.$2, paint.color);
     }
   }
 
@@ -1904,8 +1919,8 @@ class CourtPainter extends CustomPainter {
   }
 
   void _drawDashedPolyline(Canvas canvas, List<Offset> points, Paint paint) {
-    const dash = 10.0;
-    const gap = 7.0;
+    const dash = 6.0;
+    const gap = 4.5;
     var drawing = true;
     var remaining = dash;
     for (var i = 1; i < points.length; i++) {
@@ -1936,7 +1951,7 @@ class CourtPainter extends CustomPainter {
     final delta = to - from;
     if (delta.distance < 1) return;
     final angle = math.atan2(delta.dy, delta.dx);
-    const size = 12.0;
+    const size = 8.0;
     const spread = 0.5;
     final path = Path()
       ..moveTo(to.dx, to.dy)
@@ -1962,7 +1977,7 @@ class CourtPainter extends CustomPainter {
     if (delta.distance < 1) return;
     final direction = delta / delta.distance;
     final perp = Offset(-direction.dy, direction.dx);
-    const half = 11.0;
+    const half = 8.0;
     canvas.drawLine(to - perp * half, to + perp * half, paint);
   }
 
@@ -1975,7 +1990,6 @@ class CourtPainter extends CustomPainter {
       defense: defense,
       court: courtRect,
       visibleCount: _visiblePlayerCount,
-      types: const {LineType.run},
     );
     return defenseTeam ? assigned.defense : assigned.offense;
   }
@@ -1984,15 +1998,15 @@ class CourtPainter extends CustomPainter {
     if (currentProgress <= 0) return base;
     final path = (defense ? _defensePaths : _offensePaths)[index];
     if (path == null) return base;
-    return getPositionAlongPath(path, currentProgress);
+    return getPositionAlongPath(path, playbackEase(currentProgress));
   }
 
-  List<Offset>? _passPathForCarrier() {
+  DrawnLine? _carrierFlightLine() {
     if (ballCarrierId == null) return null;
     final index = ballCarrierId! - 1;
     if (index < 0 || index >= offense.length) return null;
     final carrier = CourtGeometry.normalizedToCanvas(offense[index], courtRect);
-    List<Offset>? best;
+    DrawnLine? best;
     var bestDistance = pathSnapRadius;
     for (final line in drawnLines) {
       if ((line.type != LineType.pass && line.type != LineType.shoot) ||
@@ -2003,7 +2017,7 @@ class CourtPainter extends CustomPainter {
       final distance = (start - carrier).distance;
       if (distance <= bestDistance) {
         bestDistance = distance;
-        best = line.points;
+        best = line;
       }
     }
     return best;
@@ -2014,10 +2028,13 @@ class CourtPainter extends CustomPainter {
       return CourtGeometry.normalizedToCanvas(ballDragPosition!, courtRect);
     }
     if (currentProgress > 0) {
-      final pass = _passPathForCarrier();
-      if (pass != null) {
+      final flight = _carrierFlightLine();
+      if (flight != null) {
+        final t = flight.type == LineType.pass
+            ? passFlight(currentProgress)
+            : playbackEase(currentProgress);
         return CourtGeometry.normalizedToCanvas(
-          getPositionAlongPath(pass, currentProgress),
+          getPositionAlongPath(flight.points, t),
           courtRect,
         );
       }
